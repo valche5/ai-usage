@@ -4,18 +4,18 @@ Une commande, le pourcentage consommé de chaque abonnement IA.
 
 ```
 $ ai-usage
-Claude  pro
+Claude  pro  moi@exemple.com
   5h          ▓▓▓▓▓▓▓▓▓▓▓░░░░░  74%   reset 18:30 (4h12)
   7d          ▓░░░░░░░░░░░░░░░   8%   reset mer. 13:00 (3j22h)
   extra usage 0.00/1700.00 crédits
 
-ChatGPT plus
+ChatGPT plus  moi@exemple.com
   weekly      ▓▓▓▓▓▓▓▓▓░░░░░░░  54%   reset mer. 13:28 (3j23h)
 
-Grok
+Grok  moi@exemple.com
   window      ▓▓░░░░░░░░░░░░░░  14%   reset mar. 21:36 (3j7h)
 
-Copilot business
+Copilot business  mon-login
   premium     ▓▓▓▓▓▓▓▓░░░░░░░░  50%   reset sam. 02:00 (6j11h)
   chat        illimité
   complétions illimité
@@ -77,7 +77,7 @@ Le code est construit contre ça :
 | Claude | `GET api.anthropic.com/api/oauth/usage` | `five_hour`/`seven_day`/`seven_day_{opus,sonnet}` → `{utilization 0-100, resets_at ISO}`, `extra_usage` |
 | ChatGPT | `GET chatgpt.com/backend-api/wham/usage` | `rate_limit.{primary,secondary}_window.{used_percent, limit_window_seconds, reset_at epoch s}`, `plan_type`, `credits` |
 | Grok | `POST grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` | gRPC-Web ; enveloppe champ 1 → `CreditsConfig` ; champ 1 float32 LE = % **consommé**, champ 5 = Timestamp du reset |
-| Copilot | `GET api.github.com/copilot_internal/user` | `copilot_plan`, `quota_reset_date`, `quota_snapshots.{premium_interactions,chat,completions}.{percent_remaining, unlimited, overage_permitted}` |
+| Copilot | `GET api.github.com/copilot_internal/user` | `copilot_plan`, `login`, `quota_reset_date`, `quota_snapshots.{premium_interactions,chat,completions}.{percent_remaining, unlimited, overage_permitted}` |
 
 ChatGPT écrit aussi ses snapshots dans `~/.codex/sessions/**/rollout-*.jsonl` sous une forme
 **différente** (`rate_limits.primary.window_minutes`) : le parseur accepte les deux
@@ -139,8 +139,24 @@ Copilot n'ont aucun cache local et se taisent alors.
 | Grok | `~/.grok/auth.json` → `<issuer>::<uuid>`.`key`, puis `~/.pi/agent/auth.json` → `xai` |
 | Copilot | `~/.config/github-copilot/{hosts,apps}.json`, puis `~/.local/share/opencode/auth.json`, puis `$GITHUB_TOKEN`/`$GH_TOKEN` |
 
-`--verbose` affiche le fichier retenu et le compte (email) ; ces informations n'apparaissent
-jamais sans ce flag, ni dans `--short`.
+## Quel compte ?
+
+Chaque bloc nomme le compte auquel les chiffres appartiennent — un pourcentage sans
+propriétaire n'est pas actionnable quand un Claude perso et un siège Copilot pro coexistent.
+
+| Provider | Nom affiché | Id (`--verbose`) | Origine |
+|---|---|---|---|
+| Claude | email | `accountUuid` | `~/.claude.json → oauthAccount` |
+| ChatGPT | email | `chatgpt_account_id` | claims du JWT (`profile`, `auth`) |
+| Grok | email | `user_id` | `~/.grok/auth.json`, sinon `principal_id`/`sub` du JWT |
+| Copilot | `login` GitHub | — | champ `login` de la réponse `copilot_internal/user` |
+
+Copilot est le seul à ne rien savoir hors ligne : les sources opencode et `$GITHUB_TOKEN` ne
+contiennent qu'un token opaque, et le login vient de la réponse elle-même.
+
+`--verbose` ajoute l'id complet (ce qui distingue deux comptes partageant un email) et le
+fichier de credentials retenu. `--json` expose `account` et `account_id`. `--short` reste une
+seule ligne de pourcentages : aucun compte n'y apparaît.
 
 ## Crédits
 

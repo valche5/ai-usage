@@ -102,7 +102,7 @@ func run(args []string) (code int) {
 	fs.BoolVar(&o.force, "force", false, "ignorer aussi le plancher Anthropic (peut te faire 429)")
 	fs.BoolVar(&o.noCache, "no-cache", false, "ne pas lire ni écrire le cache")
 	fs.StringVar(&o.cacheDir, "cache-dir", "", "répertoire de cache (défaut : $XDG_CACHE_HOME/ai-usage)")
-	fs.BoolVar(&o.verbose, "verbose", false, "afficher les chemins de credentials et le compte")
+	fs.BoolVar(&o.verbose, "verbose", false, "afficher les chemins de credentials et l'id de compte")
 	fs.BoolVar(&o.debug, "debug", false, "diagnostics sur stderr")
 	fs.DurationVar(&o.timeout, "timeout", 8*time.Second, "délai maximum par provider")
 	fs.StringVar(&o.colorArg, "color", "auto", "couleurs : auto, always, never")
@@ -160,7 +160,7 @@ func run(args []string) (code int) {
 	case o.check:
 		fmt.Print(render.Check(reports, ropts))
 	case o.jsonOut:
-		if err := writeJSON(reports, o, now); err != nil {
+		if err := writeJSON(reports, now); err != nil {
 			fmt.Fprintln(os.Stderr, "ai-usage:", err)
 			return exitFailure
 		}
@@ -323,14 +323,14 @@ func visible(reports []provider.Report, hideUnconfigured bool) []provider.Report
 	return out
 }
 
-func writeJSON(reports []provider.Report, o options, now time.Time) error {
+func writeJSON(reports []provider.Report, now time.Time) error {
 	clean := make([]provider.Report, len(reports))
 	for i, r := range reports {
-		// The fingerprint is an internal cache key, and the account is PII.
+		// The fingerprint is an internal cache key and means nothing outside
+		// this process. The account stays: the table names it too, and a
+		// machine consumer aggregating several accounts needs to tell them
+		// apart.
 		r.TokenFP = ""
-		if !o.verbose {
-			r.Account = ""
-		}
 		if r.Windows == nil {
 			r.Windows = []provider.Window{}
 		}

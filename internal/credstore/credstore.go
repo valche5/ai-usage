@@ -28,10 +28,10 @@ type Cred struct {
 	Path      string    // file it came from, for display
 	Token     string    // the secret; never logged, never persisted
 	Expires   time.Time // zero means unknown
-	AccountID string
+	AccountID string    // stable account identifier (uuid, org id): shown under --verbose
 	Plan      string
 	Tier      string
-	Email     string // PII: only shown under --verbose
+	Email     string // email or login: identifies which account the figures belong to
 }
 
 // Skew is the safety margin before treating a token as expired.
@@ -127,6 +127,20 @@ func JWTExpiry(tok string) (time.Time, bool) {
 	return time.Unix(int64(exp), 0), true
 }
 
+// jwtSubject reads the account the token was issued for. Only used to label the
+// report when the auth file states no account of its own; never for auth.
+func jwtSubject(tok string) string {
+	claims, err := DecodeJWT(tok)
+	if err != nil {
+		return ""
+	}
+	// principal_id is xAI's own account field; sub is the standard fallback.
+	if s := str(claims["principal_id"]); s != "" {
+		return s
+	}
+	return str(claims["sub"])
+}
+
 // openAIAuthClaim is the namespaced claim carrying the ChatGPT plan.
 const openAIAuthClaim = "https://api.openai.com/auth"
 
@@ -181,20 +195,23 @@ func Claude() (Cred, error) {
 	if f.OAuth.ExpiresAt > 0 {
 		c.Expires = time.UnixMilli(f.OAuth.ExpiresAt)
 	}
-	c.Email = claudeEmail()
+	// The credentials file names no account at all; the identity lives in the
+	// profile blob Claude Code keeps next to it.
+	c.Email, c.AccountID = claudeAccount()
 	return c, nil
 }
 
-func claudeEmail() string {
+func claudeAccount() (email, accountID string) {
 	var top struct {
 		OAuthAccount struct {
 			EmailAddress string `json:"emailAddress"`
+			AccountUUID  string `json:"accountUuid"`
 		} `json:"oauthAccount"`
 	}
 	if err := readJSON(home(".claude.json"), &top); err != nil {
-		return ""
+		return "", ""
 	}
-	return top.OAuthAccount.EmailAddress
+	return top.OAuthAccount.EmailAddress, top.OAuthAccount.AccountUUID
 }
 
 // ---------------------------------------------------------------- Codex
@@ -310,6 +327,9 @@ func piCred(provider string) (Cred, bool) {
 		return chatgptCred(p, e.Access, e.AccountID, exp), true
 	}
 	c := Cred{Path: p, Token: e.Access, AccountID: e.AccountID, Expires: exp}
+	if c.AccountID == "" {
+		c.AccountID = jwtSubject(e.Access)
+	}
 	if jexp, ok := JWTExpiry(e.Access); ok && (c.Expires.IsZero() || jexp.Before(c.Expires)) {
 		c.Expires = jexp
 	}
@@ -323,6 +343,7 @@ type grokAuthEntry struct {
 	AuthMode  string `json:"auth_mode"`
 	ExpiresAt string `json:"expires_at"` // ISO8601
 	Email     string `json:"email"`
+	UserID    string `json:"user_id"`
 }
 
 // Grok returns candidate xAI credentials, best source first.
@@ -346,7 +367,10 @@ func Grok() ([]Cred, error) {
 			if e.Key == "" || !strings.HasPrefix(k, "https://auth.x.ai::") {
 				continue
 			}
-			c := Cred{Path: p, Token: e.Key, Email: e.Email}
+			c := Cred{Path: p, Token: e.Key, Email: e.Email, AccountID: e.UserID}
+			if c.AccountID == "" {
+				c.AccountID = jwtSubject(e.Key)
+			}
 			if t, err := time.Parse(time.RFC3339, e.ExpiresAt); err == nil {
 				c.Expires = t
 			}

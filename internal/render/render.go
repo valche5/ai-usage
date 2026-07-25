@@ -157,6 +157,21 @@ func (o Opts) resetText(w provider.Window) string {
 		o.paint(dim, "("+RelTime(*w.ResetsAt, o.Now)+")"))
 }
 
+// account renders who the figures belong to: the name alone normally, and the
+// full identifier next to it under --verbose, which is what tells two accounts
+// apart when they share an email. A report that only knows the id still shows
+// it rather than nothing.
+func account(r provider.Report, verbose bool) string {
+	switch {
+	case !verbose || r.AccountID == "":
+		return r.Account
+	case r.Account == "":
+		return r.AccountID
+	default:
+		return r.Account + " (" + r.AccountID + ")"
+	}
+}
+
 // sourceNote labels non-live data so a stale number is never mistaken for a
 // fresh one.
 func (o Opts) sourceNote(r provider.Report) string {
@@ -225,14 +240,17 @@ func Table(reports []provider.Report, o Opts) string {
 		if r.Plan != "" {
 			head += " " + o.paint(bold, r.Plan)
 		}
+		// The account is shown unconditionally: with several accounts in play
+		// (a personal Claude, a work Copilot seat), a percentage with no owner
+		// is a number you cannot act on.
+		if acct := account(r, o.Verbose); acct != "" {
+			head += "  " + o.paint(dim, acct)
+		}
 		if note := o.sourceNote(r); note != "" {
 			head += "  " + o.paint(yellow, "("+note+")")
 		}
 		if o.Verbose && r.CredPath != "" {
 			head += "  " + o.paint(dim, r.CredPath)
-		}
-		if o.Verbose && r.Account != "" {
-			head += "  " + o.paint(dim, r.Account)
 		}
 		b.WriteString(strings.TrimRight(head, " ") + "\n")
 
@@ -356,6 +374,11 @@ func Check(reports []provider.Report, o Opts) string {
 		}
 		fmt.Fprintf(&b, "%-8s %s  source=%-5s fenêtres=%d\n",
 			r.ID, o.paint(code, fmt.Sprintf("%-6s", verdict)), orDash(string(r.Source)), len(r.Windows))
+
+		// A drift diagnostic without the account is ambiguous: the same
+		// endpoint answers differently for a personal and a business seat.
+		fmt.Fprintf(&b, "           compte=%s cred=%s\n",
+			orDash(account(r, true)), orDash(r.CredPath))
 
 		for _, w := range r.Windows {
 			resetInfo := "reset=—"

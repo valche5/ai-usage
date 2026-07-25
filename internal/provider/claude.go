@@ -69,12 +69,13 @@ func (c Claude) Collect(ctx context.Context, o Options) Report {
 	}
 
 	base := Report{
-		ID:       c.ID(),
-		Name:     c.Name(),
-		Plan:     cred.Plan,
-		CredPath: credstore.Display(cred.Path),
-		Account:  cred.Email,
-		TokenFP:  credstore.Fingerprint(cred.Token),
+		ID:        c.ID(),
+		Name:      c.Name(),
+		Plan:      cred.Plan,
+		CredPath:  credstore.Display(cred.Path),
+		Account:   cred.Email,
+		AccountID: cred.AccountID,
+		TokenFP:   credstore.Fingerprint(cred.Token),
 	}
 
 	if o.Offline {

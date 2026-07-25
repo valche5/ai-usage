@@ -39,6 +39,10 @@ type copilotResponse struct {
 	CopilotPlan    string                  `json:"copilot_plan"`
 	QuotaResetDate string                  `json:"quota_reset_date"`
 	QuotaSnapshots map[string]copilotQuota `json:"quota_snapshots"`
+	// Login is the GitHub account the seat belongs to. It is the only account
+	// name available here: the opencode and $GITHUB_TOKEN sources carry an
+	// opaque token and no identity at all.
+	Login string `json:"login"`
 
 	// Free-tier shape.
 	LimitedUserQuotas    map[string]float64 `json:"limited_user_quotas"`
@@ -56,6 +60,10 @@ func (c Copilot) Collect(ctx context.Context, o Options) Report {
 	}
 
 	base := Report{ID: c.ID(), Name: c.Name()}
+	// Name the credential we would have used, so even a failing line says which
+	// account it is about. The loop below refines this per candidate.
+	base.CredPath = credstore.Display(cands[0].Path)
+	base.Account = cands[0].Email
 	if o.Offline {
 		base.Status = StatusError
 		base.Reason = "mode hors ligne — Copilot n'a aucun cache local"
@@ -100,6 +108,9 @@ func (c Copilot) Collect(ctx context.Context, o Options) Report {
 		base.Source = SourceLive
 		base.FetchedAt = o.Now
 		base.Plan = resp.CopilotPlan
+		if resp.Login != "" {
+			base.Account = resp.Login
+		}
 		base.Windows = windows
 		base.Notes = notes
 		return base

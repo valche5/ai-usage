@@ -57,8 +57,14 @@ type Report struct {
 	Reason string `json:"reason,omitempty"`
 	// CredPath is the file the credential came from (path only, no token).
 	CredPath string `json:"cred_path,omitempty"`
-	// Account is PII (email / uuid) and is only rendered under --verbose.
+	// Account names the account the figures belong to: an email, or a login for
+	// Copilot. Rendered next to the provider so a report is never ambiguous
+	// about which of several accounts it describes.
 	Account string `json:"account,omitempty"`
+	// AccountID is the stable identifier behind that name (uuid, org id). It
+	// tells two accounts apart when they share an email, and is only rendered
+	// under --verbose since the name is what a human reads.
+	AccountID string `json:"account_id,omitempty"`
 
 	// Warnings flag values that look wrong rather than merely absent — the
 	// signature of an upstream response shape or unit change. These are always

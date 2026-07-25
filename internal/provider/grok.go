@@ -44,11 +44,12 @@ func (g Grok) Collect(ctx context.Context, o Options) Report {
 
 	cred, valid := credstore.Choose(cands, o.Now)
 	base := Report{
-		ID:       g.ID(),
-		Name:     g.Name(),
-		CredPath: credstore.Display(cred.Path),
-		Account:  cred.Email,
-		TokenFP:  credstore.Fingerprint(cred.Token),
+		ID:        g.ID(),
+		Name:      g.Name(),
+		CredPath:  credstore.Display(cred.Path),
+		Account:   cred.Email,
+		AccountID: cred.AccountID,
+		TokenFP:   credstore.Fingerprint(cred.Token),
 	}
 
 	// xAI exposes no local usage cache, so this provider simply goes quiet

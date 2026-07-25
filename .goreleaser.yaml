@@ -1,0 +1,50 @@
+version: 2
+
+project_name: ai-usage
+
+gitea_urls:
+  api: https://gitea.valche5.fr/api/v1
+  download: https://gitea.valche5.fr
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/ai-usage
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [binary]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  gitea:
+    owner: valche5
+    name: ai-usage
+  draft: false
+  prerelease: auto

@@ -15,6 +15,10 @@ ChatGPT plus  moi@exemple.com
 Grok  moi@exemple.com
   window      ▓▓░░░░░░░░░░░░░░  14%   reset mar. 21:36 (3j7h)
 
+Kimi  basic
+  5h          ▓░░░░░░░░░░░░░░░   8%   reset 18:04 (4h24)
+  plan        ▓░░░░░░░░░░░░░░░   2%   reset dim. 13:04 (6j23h)
+
 Copilot business  mon-login
   premium     ▓▓▓▓▓▓▓▓░░░░░░░░  50%   reset sam. 02:00 (6j11h)
   chat        illimité
@@ -36,7 +40,7 @@ Go 1.26+, zéro dépendance, binaire statique.
 
 ```
 ai-usage                      rapport complet
-ai-usage --short              une ligne : claude 74%/8% · chatgpt 54% · grok 14% · copilot 50%/∞/∞
+ai-usage --short              une ligne : claude 74%/8% · chatgpt 54% · grok 14% · kimi 8%/2% · copilot 50%/∞/∞
 ai-usage --json               sortie machine (schema_version 1)
 ai-usage --offline            aucun appel réseau (voir plus bas)
 ai-usage --only claude,grok   filtrer
@@ -51,7 +55,7 @@ Codes de sortie : `0` tout va bien · `1` un provider en échec, une dérive dé
 
 ## Le risque principal : ces APIs ne sont pas documentées
 
-Les quatre endpoints sont internes. Ils peuvent changer sans préavis, et le pire scénario
+Les cinq endpoints sont internes. Ils peuvent changer sans préavis, et le pire scénario
 n'est pas la panne — c'est un **chiffre plausible mais faux** (un champ renommé, une échelle
 qui passe de 0-100 à 0-1, « consommé » qui devient « restant »).
 
@@ -60,6 +64,12 @@ Le code est construit contre ça :
 - **Aucun clamp silencieux.** Les providers stockent la valeur brute ; `Report.Validate`
   signale un pourcentage hors bornes, un reset dans le passé ou un reset à plus de 45 jours,
   *puis* borne pour l'affichage. Un avertissement `⚠` s'affiche toujours, jamais derrière un flag.
+- **Périmé n'est pas dérive.** La plausibilité d'une date est jugée depuis l'instant où le
+  chiffre a été produit (`fetched_at`), pas depuis maintenant : un cache local relu parce que
+  le token a expiré est légitimement vieux de plusieurs heures, et sa fenêtre 5 h a réellement
+  été franchie depuis. Ce cas affiche « fenêtre 5h réinitialisée depuis — ce pourcentage est
+  obsolète » et sort en `0` ; l'alarme `⚠` de dérive reste réservée aux dates invraisemblables
+  *au moment de la collecte*.
 - **Décodage réussi ≠ données reconnues.** Si un endpoint répond 200 mais qu'aucun champ
   attendu n'est trouvé, le message le dit explicitement (« forme de réponse inattendue ») et
   le run sort en `1`, au lieu de retomber discrètement sur une donnée périmée.
@@ -68,7 +78,7 @@ Le code est construit contre ça :
 - **`ai-usage --check`** affiche, par provider, ce qui a réellement été reconnu (champs,
   durées, resets). C'est le premier réflexe quand un chiffre paraît faux.
 
-### Forme observée des réponses (2026-07-25)
+### Forme observée des réponses (2026-07-26)
 
 À comparer quand `--check` signale une dérive.
 
@@ -77,6 +87,7 @@ Le code est construit contre ça :
 | Claude | `GET api.anthropic.com/api/oauth/usage` | `five_hour`/`seven_day`/`seven_day_{opus,sonnet}` → `{utilization 0-100, resets_at ISO}`, `extra_usage` |
 | ChatGPT | `GET chatgpt.com/backend-api/wham/usage` | `rate_limit.{primary,secondary}_window.{used_percent, limit_window_seconds, reset_at epoch s}`, `plan_type`, `credits` |
 | Grok | `POST grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` | gRPC-Web ; enveloppe champ 1 → `CreditsConfig` ; champ 1 float32 LE = % **consommé**, champ 5 = Timestamp du reset |
+| Kimi | `GET api.kimi.com/coding/v1/usages` | `usage.{limit,used,remaining,resetTime}` (quota du plan), `limits[].{window.{duration,timeUnit},detail.{limit,used,remaining,resetTime}}`, `user.membership.level`, `user.userId` |
 | Copilot | `GET api.github.com/copilot_internal/user` | `copilot_plan`, `login`, `quota_reset_date`, `quota_snapshots.{premium_interactions,chat,completions}.{percent_remaining, unlimited, overage_permitted}` |
 
 ChatGPT écrit aussi ses snapshots dans `~/.codex/sessions/**/rollout-*.jsonl` sous une forme
@@ -114,7 +125,7 @@ Le cache n'est pas un confort : c'est ce qui applique la recommandation Anthropi
 entre deux appels. Ce rate limit est **rattaché à l'access token, donc partagé avec ton vrai
 client Claude Code** — poller agressivement throttlerait ton travail réel.
 
-TTL : Claude 180 s, ChatGPT 60 s, Grok 60 s, Copilot 300 s. `--refresh` ignore les TTL mais
+TTL : Claude 180 s, ChatGPT 60 s, Grok 60 s, Kimi 300 s, Copilot 300 s. `--refresh` ignore les TTL mais
 **conserve** le plancher Anthropic ; seul `--force` l'outrepasse. Pas de retry : sur `429` on
 sert la donnée en cache immédiatement.
 
@@ -127,8 +138,8 @@ présenter comme un autre client reste une zone grise vis-à-vis de la politique
 
 **`--offline` est la version sans aucune de ces réserves** : zéro réseau, zéro usurpation. Il
 relit `~/.claude.json → cachedUsageUtilization` (que Claude Code rafraîchit lui-même) et les
-rollouts Codex. C'est le mode à préférer pour une statusline ou un prompt shell. Grok et
-Copilot n'ont aucun cache local et se taisent alors.
+rollouts Codex. C'est le mode à préférer pour une statusline ou un prompt shell. Grok, Kimi
+et Copilot n'ont aucun cache local et se taisent alors.
 
 ## Sources de credentials
 
@@ -137,6 +148,7 @@ Copilot n'ont aucun cache local et se taisent alors.
 | Claude | `~/.claude/.credentials.json` → `claudeAiOauth.accessToken` |
 | ChatGPT | `~/.codex/auth.json` → `tokens.access_token`, puis `~/.pi/agent/auth.json` → `openai-codex` |
 | Grok | `~/.grok/auth.json` → `<issuer>::<uuid>`.`key`, puis `~/.pi/agent/auth.json` → `xai` |
+| Kimi | `~/.local/share/opencode/auth.json` → `kimi-for-coding`.`key` (ou `.access`), puis `$KIMI_API_KEY`/`$KIMI_CODE_API_KEY` |
 | Copilot | `~/.config/github-copilot/{hosts,apps}.json`, puis `~/.local/share/opencode/auth.json`, puis `$GITHUB_TOKEN`/`$GH_TOKEN` |
 
 ## Quel compte ?
@@ -149,10 +161,18 @@ propriétaire n'est pas actionnable quand un Claude perso et un siège Copilot p
 | Claude | email | `accountUuid` | `~/.claude.json → oauthAccount` |
 | ChatGPT | email | `chatgpt_account_id` | claims du JWT (`profile`, `auth`) |
 | Grok | email | `user_id` | `~/.grok/auth.json`, sinon `principal_id`/`sub` du JWT |
+| Kimi | `userId` (faute de mieux) | `userId` | champ `user.userId` de la réponse `coding/v1/usages` |
 | Copilot | `login` GitHub | — | champ `login` de la réponse `copilot_internal/user` |
 
 Copilot est le seul à ne rien savoir hors ligne : les sources opencode et `$GITHUB_TOKEN` ne
 contiennent qu'un token opaque, et le login vient de la réponse elle-même.
+
+Kimi ne connaît **aucun nom** : la clé est un `sk-…` sans claims (pas un JWT), `coding/v1`
+n'expose aucun endpoint de profil (`/me`, `/user`, `/users/me`, `/account`… tous en 404),
+la clé est refusée par l'API plateforme `api.moonshot.ai`, et l'identité ne vit que derrière
+le cookie navigateur `kimi-auth` de `www.kimi.com` — que cet outil ne lit pas. Faute de nom,
+c'est l'identifiant opaque `userId` qui est affiché à sa place : un pourcentage sans
+propriétaire n'est pas actionnable, un identifiant laid vaut mieux qu'un blanc.
 
 `--verbose` ajoute l'id complet (ce qui distingue deux comptes partageant un email) et le
 fichier de credentials retenu. `--json` expose `account` et `account_id`. `--short` reste une

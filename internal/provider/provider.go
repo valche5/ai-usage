@@ -139,6 +139,16 @@ const maxPlausibleWindow = 45 * 24 * time.Hour
 // (that shows up as an error) but that a field is renamed, re-scaled, or
 // flipped in meaning while still decoding cleanly.
 func (r *Report) Validate(now time.Time) {
+	// Dates are judged from the moment the figures were produced, not from now.
+	// A local cache read because the token expired is legitimately hours old, so
+	// its 5h window has genuinely elapsed since — measuring from now would
+	// report that ordinary staleness as upstream drift, and the drift alarm is
+	// only worth having as long as it never cries wolf.
+	ref := now
+	if !r.FetchedAt.IsZero() && r.FetchedAt.Before(now) {
+		ref = r.FetchedAt
+	}
+
 	for i := range r.Windows {
 		w := &r.Windows[i]
 
@@ -156,13 +166,19 @@ func (r *Report) Validate(now time.Time) {
 		if w.ResetsAt == nil {
 			continue
 		}
-		switch d := w.ResetsAt.Sub(now); {
+		switch d := w.ResetsAt.Sub(ref); {
 		case d < -5*time.Minute:
 			r.warn("%s : reset dans le passé (%s) — champ de date probablement changé",
 				w.Label, w.ResetsAt.Local().Format("02/01/2006 15:04"))
 		case d > maxPlausibleWindow:
 			r.warn("%s : reset dans %d jours, invraisemblable — unité de date probablement changée",
 				w.Label, int(d.Hours()/24))
+		case w.ResetsAt.Before(now):
+			// Plausible when it was fetched, expired by now: the window has run
+			// its course, so the percentage describes a quota that no longer
+			// exists. Say that instead of implying the number is current.
+			r.Notes = append(r.Notes,
+				fmt.Sprintf("fenêtre %s réinitialisée depuis — ce pourcentage est obsolète", w.Label))
 		}
 	}
 }

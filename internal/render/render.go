@@ -159,14 +159,18 @@ func (o Opts) resetText(w provider.Window) string {
 
 // account renders who the figures belong to: the name alone normally, and the
 // full identifier next to it under --verbose, which is what tells two accounts
-// apart when they share an email. A report that only knows the id still shows
-// it rather than nothing.
+// apart when they share an email.
+//
+// When the source knows no name at all — a Kimi API key is attached to nothing
+// but an opaque userId, and Moonshot exposes no profile endpoint — the id is
+// shown in its place even without --verbose. An ugly identifier still says
+// which account the percentage belongs to; a blank says nothing.
 func account(r provider.Report, verbose bool) string {
 	switch {
-	case !verbose || r.AccountID == "":
-		return r.Account
 	case r.Account == "":
 		return r.AccountID
+	case !verbose || r.AccountID == "":
+		return r.Account
 	default:
 		return r.Account + " (" + r.AccountID + ")"
 	}
@@ -277,7 +281,9 @@ func Table(reports []provider.Report, o Opts) string {
 		for _, w := range r.Warnings {
 			b.WriteString("  " + o.paint(red, "⚠ "+w) + "\n")
 		}
-		if r.Status == provider.StatusError && len(r.Windows) > 0 && r.Reason != "" {
+		// Stale numbers carry the reason too, not just failed ones: "(local, 22h)"
+		// says the data is old, but only the reason says what to run to fix it.
+		if r.Degraded() && len(r.Windows) > 0 && r.Reason != "" {
 			b.WriteString("  " + o.paint(yellow, "! "+r.Reason) + "\n")
 		}
 	}

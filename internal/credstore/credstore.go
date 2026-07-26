@@ -390,6 +390,54 @@ func Grok() ([]Cred, error) {
 	return out, nil
 }
 
+// ---------------------------------------------------------------- Kimi
+
+// Kimi returns candidate Kimi For Coding credentials, best source first.
+//
+// The subscription key lives in opencode's auth store under the provider id
+// "kimi-for-coding"; the Kimi CLI's own credential file is deliberately not
+// read, since its layout has not been verified here and a guessed field name
+// would report someone else's numbers rather than nothing.
+func Kimi() ([]Cred, error) {
+	var out []Cred
+
+	p := filepath.Join(xdgData(), "opencode", "auth.json")
+	var f map[string]struct {
+		Type    string `json:"type"`
+		Key     string `json:"key"`    // type "api"
+		Access  string `json:"access"` // type "oauth"
+		Expires int64  `json:"expires"`
+	}
+	if err := readJSON(p, &f); err == nil {
+		if e, ok := f["kimi-for-coding"]; ok {
+			tok := e.Key
+			if tok == "" {
+				tok = e.Access
+			}
+			if tok != "" {
+				c := Cred{Path: p, Token: tok}
+				if e.Expires > 0 {
+					c.Expires = time.UnixMilli(e.Expires)
+				}
+				out = append(out, c)
+			}
+		}
+	}
+
+	// The documented variables, for a shell that exports the key directly. They
+	// cannot redirect anything: the usage URL is hardcoded.
+	for _, env := range []string{"KIMI_API_KEY", "KIMI_CODE_API_KEY"} {
+		if v := os.Getenv(env); v != "" {
+			out = append(out, Cred{Path: "$" + env, Token: v})
+		}
+	}
+
+	if len(out) == 0 {
+		return nil, ErrMissing
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------- Copilot
 
 // Copilot returns candidate GitHub tokens able to read the Copilot quota.

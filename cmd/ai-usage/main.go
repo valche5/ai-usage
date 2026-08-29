@@ -45,6 +45,10 @@ var ttl = map[string]time.Duration{
 	// at the Copilot rhythm rather than the 60s one: nothing in that window
 	// moves fast enough to justify 300 calls per window.
 	"kimi": 300 * time.Second,
+	// OpenRouter and OpenCode are prepaid-pool accounts: numbers move at the
+	// pace of real money, never fast enough to poll harder.
+	"openrouter": 300 * time.Second,
+	"opencode":   300 * time.Second,
 }
 
 // anthropicFloor is the minimum interval between calls to the Anthropic usage
@@ -99,7 +103,7 @@ func run(args []string) (code int) {
 
 	fs.BoolVar(&o.jsonOut, "json", false, "sortie JSON stable")
 	fs.BoolVar(&o.short, "short", false, "une seule ligne, pour un prompt ou une statusline")
-	fs.StringVar(&o.only, "only", "", "limiter aux providers listés (claude,chatgpt,grok,kimi,copilot)")
+	fs.StringVar(&o.only, "only", "", "limiter aux providers listés (claude,chatgpt,grok,kimi,copilot,openrouter,opencode)")
 	fs.BoolVar(&o.all, "all", false, "afficher aussi les providers non configurés")
 	fs.BoolVar(&o.offline, "offline", false, "aucun appel réseau : caches locaux uniquement")
 	fs.BoolVar(&o.refresh, "refresh", false, "ignorer le cache (plancher Anthropic de 180s conservé)")
@@ -134,6 +138,7 @@ func run(args []string) (code int) {
 
 	all := []provider.Provider{
 		provider.Claude{}, provider.Codex{}, provider.Grok{}, provider.Kimi{}, provider.Copilot{},
+		provider.OpenRouter{}, provider.OpenCode{},
 	}
 	selected, err := selectProviders(all, o.only)
 	if err != nil {
@@ -299,6 +304,7 @@ func selectProviders(all []provider.Provider, only string) ([]provider.Provider,
 		"openai": "chatgpt", "codex": "chatgpt", "gpt": "chatgpt",
 		"anthropic": "claude", "xai": "grok", "gh": "copilot", "github": "copilot",
 		"moonshot": "kimi", "kimi-for-coding": "kimi",
+		"or": "openrouter", "oc": "opencode", "zen": "opencode",
 	} {
 		byID[alias] = byID[id]
 	}

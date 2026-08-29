@@ -499,6 +499,118 @@ func xdgData() string {
 	return home(".local", "share")
 }
 
+// ---------------------------------------------------------------- OpenRouter
+
+// OpenRouter returns candidate OpenRouter API keys, best source first.
+//
+// pi keeps its own openrouter entry (type "api_key"); opencode may hold one
+// too (type "api"). Both belong to the same OpenRouter account in practice,
+// but the fingerprint keeps the cache honest if that ever stops being true.
+func OpenRouter() ([]Cred, error) {
+	var out []Cred
+
+	{
+		p := home(".pi", "agent", "auth.json")
+		var f map[string]struct {
+			Type string `json:"type"`
+			Key  string `json:"key"`
+		}
+		if err := readJSON(p, &f); err == nil {
+			if e, ok := f["openrouter"]; ok && e.Type == "api_key" && e.Key != "" {
+				out = append(out, Cred{Path: p, Token: e.Key})
+			}
+		}
+	}
+
+	{
+		p := filepath.Join(xdgData(), "opencode", "auth.json")
+		var f map[string]struct {
+			Type   string `json:"type"`
+			Key    string `json:"key"`
+			Access string `json:"access"`
+		}
+		if err := readJSON(p, &f); err == nil {
+			if e, ok := f["openrouter"]; ok {
+				tok := e.Key
+				if tok == "" {
+					tok = e.Access
+				}
+				if tok != "" {
+					out = append(out, Cred{Path: p, Token: tok})
+				}
+			}
+		}
+	}
+
+	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
+		out = append(out, Cred{Path: "$OPENROUTER_API_KEY", Token: v})
+	}
+
+	if len(out) == 0 {
+		return nil, ErrMissing
+	}
+	return out, nil
+}
+
+// ---------------------------------------------------------------- OpenCode
+
+// OpenCode returns candidate OpenCode Zen/Go API keys, best source first.
+//
+// The key lives in opencode's auth store under the provider ids "opencode"
+// (zen, pay-as-you-go) and "opencode-go" (the Go subscription); they often
+// hold the same token, so duplicates are dropped.
+func OpenCode() ([]Cred, error) {
+	p := filepath.Join(xdgData(), "opencode", "auth.json")
+	var f map[string]struct {
+		Type    string `json:"type"`
+		Key     string `json:"key"`
+		Access  string `json:"access"`
+		Expires int64  `json:"expires"`
+	}
+	if err := readJSON(p, &f); err != nil {
+		if errors.Is(err, ErrMissing) {
+			return nil, ErrMissing
+		}
+		return nil, err
+	}
+
+	var out []Cred
+	for _, id := range []string{"opencode", "opencode-go"} {
+		e, ok := f[id]
+		if !ok {
+			continue
+		}
+		tok := e.Key
+		if tok == "" {
+			tok = e.Access
+		}
+		if tok == "" {
+			continue
+		}
+		c := Cred{Path: p, Token: tok}
+		if e.Expires > 0 {
+			c.Expires = time.UnixMilli(e.Expires)
+		}
+		if !hasToken(out, tok) {
+			out = append(out, c)
+		}
+	}
+
+	if len(out) == 0 {
+		return nil, ErrMissing
+	}
+	return out, nil
+}
+
+func hasToken(cands []Cred, tok string) bool {
+	for _, c := range cands {
+		if c.Token == tok {
+			return true
+		}
+	}
+	return false
+}
+
 // ---------------------------------------------------------------- selection
 
 // Choose picks the first candidate that is still valid, in declared preference

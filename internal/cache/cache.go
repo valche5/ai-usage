@@ -119,6 +119,21 @@ func (c *Cache) Put(r provider.Report, now time.Time) {
 	c.dirty = true
 }
 
+// Delete drops the cached entry for id. Used when the credential that produced
+// it is gone from $HOME: the figures describe a subscription that is no longer
+// installed, so replaying them on every run would resurrect a dead provider.
+func (c *Cache) Delete(id string) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.entries[id]; ok {
+		delete(c.entries, id)
+		c.dirty = true
+	}
+}
+
 // Flush writes the cache atomically: a temp file in the same directory, then a
 // rename, so a crash can never leave a half-written cache behind.
 func (c *Cache) Flush() error {

@@ -210,8 +210,11 @@ func collect(ps []provider.Provider, c *cache.Cache, o options, now time.Time) [
 			cached, hasCached := c.Get(p.ID(), fp)
 
 			// A fresh cache hit is the normal path: it is what keeps us within
-			// the provider's polling guidance.
-			if hasCached && cached.Fresh(now, effectiveTTL(p.ID(), o)) {
+			// the provider's polling guidance. Without a fingerprint we only
+			// trust it offline: in a live run an empty fingerprint means the
+			// credential that wrote the entry is gone from $HOME, so the entry
+			// must be dropped, not replayed.
+			if hasCached && cached.Fresh(now, effectiveTTL(p.ID(), o)) && (o.offline || fp != "") {
 				r := cached.Report
 				r.Source = provider.SourceCache
 				r.FetchedAt = cached.StoredAt
@@ -229,6 +232,14 @@ func collect(ps []provider.Provider, c *cache.Cache, o options, now time.Time) [
 				Debug:   o.debug,
 				HTTP:    client,
 			})
+
+			// The credential this entry belonged to no longer exists anywhere
+			// in $HOME. The cached figures describe a subscription that is not
+			// installed here anymore, so the entry is deleted rather than
+			// resurfacing on every subsequent run.
+			if r.Status == provider.StatusUnconfigured {
+				c.Delete(p.ID())
+			}
 
 			// Live failed but we still have numbers from a previous run: show
 			// them rather than nothing, clearly marked as stale.

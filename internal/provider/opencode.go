@@ -83,11 +83,13 @@ func (o OpenCode) Collect(ctx context.Context, opts Options) Report {
 
 		// A 403 here is not a bad key: the gateway answers "Go subscription
 		// required" for a workspace that lives on the zen balance instead,
-		// which the API does not expose at all.
+		// which the API does not expose at all. That is a soft skip, not a
+		// failure: nothing reportable exists for this key, so the provider
+		// stays quiet — --all, --check and --debug still surface the reason.
 		var he httpx.HTTPError
 		if errors.As(err, &he) && he.Status == 403 && strings.Contains(he.Excerpt, "Go subscription") {
-			base.Reason = "pas d'abonnement OpenCode Go — la balance zen n'est pas exposée via l'API (voir opencode.ai/workspace)"
-			return base
+			return Unconfigured(o.ID(), o.Name(),
+				"pas d'abonnement OpenCode Go — la balance zen n'est pas exposée via l'API (voir opencode.ai/workspace)")
 		}
 		base.Reason = err.Error()
 		if httpx.IsUnauthorized(err) {

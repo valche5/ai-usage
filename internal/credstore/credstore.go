@@ -542,6 +542,15 @@ func OpenRouter() ([]Cred, error) {
 		}
 	}
 
+	// Hermes keeps its API keys in a dotenv file (~/.hermes/.env). A user
+	// connected to OpenRouter through Hermes holds the key there even though
+	// no CLI wrote it into its own auth store, so read it as a fallback
+	// source. Strictly read-only like every entry in this package: we extract
+	// the one variable and never touch the file.
+	if v, ok := openRouterKeyFromHermesEnv(home(".hermes", ".env")); ok {
+		out = append(out, Cred{Path: home(".hermes", ".env"), Token: v})
+	}
+
 	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
 		out = append(out, Cred{Path: "$OPENROUTER_API_KEY", Token: v})
 	}
@@ -550,6 +559,38 @@ func OpenRouter() ([]Cred, error) {
 		return nil, ErrMissing
 	}
 	return out, nil
+}
+
+// openRouterKeyFromHermesEnv extracts OPENROUTER_API_KEY from a dotenv file
+// without sourcing it, so arbitrary content in the file is never executed.
+// Returns the trimmed value and whether it was found.
+func openRouterKeyFromHermesEnv(p string) (string, bool) {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "", false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(trimmed, "=")
+		if !ok || strings.TrimSpace(k) != "OPENROUTER_API_KEY" {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		// Strip a single layer of surrounding quotes, dotenv style.
+		if len(v) >= 2 {
+			if (v[0] == '"' && v[len(v)-1] == '"') ||
+				(v[0] == '\'' && v[len(v)-1] == '\'') {
+				v = v[1 : len(v)-1]
+			}
+		}
+		if v != "" {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // ---------------------------------------------------------------- OpenCode

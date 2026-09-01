@@ -125,7 +125,7 @@ Le cache n'est pas un confort : c'est ce qui applique la recommandation Anthropi
 entre deux appels. Ce rate limit est **rattaché à l'access token, donc partagé avec ton vrai
 client Claude Code** — poller agressivement throttlerait ton travail réel.
 
-TTL : Claude 180 s, ChatGPT 60 s, Grok 60 s, Kimi 300 s, Copilot 300 s. `--refresh` ignore les TTL mais
+TTL : Claude 180 s, ChatGPT 60 s, Grok 60 s, Copilot 60 s, OpenRouter 60 s, Kimi 300 s, OpenCode 300 s. `--refresh` ignore les TTL mais
 **conserve** le plancher Anthropic ; seul `--force` l'outrepasse. Pas de retry : sur `429` on
 sert la donnée en cache immédiatement.
 

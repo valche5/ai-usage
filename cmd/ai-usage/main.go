@@ -40,15 +40,18 @@ var ttl = map[string]time.Duration{
 	"claude":  180 * time.Second,
 	"chatgpt": 60 * time.Second,
 	"grok":    60 * time.Second,
-	"copilot": 300 * time.Second,
+	// Copilot and OpenRouter are tracked at 60s because large-model spend can
+	// move a quota window fast; nothing behind them has a hard floor like
+	// Anthropic's, and the cost of a 429 is just serving the stale cache.
+	"copilot":    60 * time.Second,
+	"openrouter": 60 * time.Second,
 	// Kimi's 5h allowance is only 100 units wide, so it is deliberately polled
-	// at the Copilot rhythm rather than the 60s one: nothing in that window
-	// moves fast enough to justify 300 calls per window.
+	// at a slower rhythm: nothing in that window moves fast enough to justify
+	// the extra calls per window.
 	"kimi": 300 * time.Second,
-	// OpenRouter and OpenCode are prepaid-pool accounts: numbers move at the
-	// pace of real money, never fast enough to poll harder.
-	"openrouter": 300 * time.Second,
-	"opencode":   300 * time.Second,
+	// OpenCode is a prepaid-pool account where the numbers move at the pace of
+	// real money spent, never fast enough to poll harder.
+	"opencode": 300 * time.Second,
 }
 
 // anthropicFloor is the minimum interval between calls to the Anthropic usage

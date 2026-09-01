@@ -2,8 +2,10 @@
 //
 // It discovers credentials that the already-installed CLIs (claude, codex, pi,
 // grok, opencode) wrote to $HOME, reads each provider's own usage source, and
-// renders one aligned report. It is strictly read-only: no token is ever
-// refreshed, rewritten or logged.
+// renders one aligned report. Reporting is read-only: ai-usage never writes or
+// parses a refresh token. When a token is genuinely expired, ai-usage launches
+// the owning CLI once (cheap print mode) so the CLI itself refreshes it —
+// only in the live path, never in --offline, never on a fresh cache.
 package main
 
 import (
@@ -22,6 +24,7 @@ import (
 	"github.com/valche5/ai-usage/internal/httpx"
 	"github.com/valche5/ai-usage/internal/provider"
 	"github.com/valche5/ai-usage/internal/render"
+	"github.com/valche5/ai-usage/internal/renew"
 )
 
 // version is stamped by the Makefile via -ldflags.
@@ -98,6 +101,12 @@ func run(args []string) (code int) {
 			code = exitFailure
 		}
 	}()
+
+	// Sub-command dispatch: `ai-usage renew [--only providers]`. Peeled off before
+	// flag parsing since `renew` is a verb, not a flag.
+	if len(args) > 0 && args[0] == "renew" {
+		return runRenew(args[1:])
+	}
 
 	var o options
 	fs := flag.NewFlagSet("ai-usage", flag.ContinueOnError)
@@ -230,16 +239,54 @@ func collect(ps []provider.Provider, c *cache.Cache, o options, now time.Time) [
 				return
 			}
 
+			// Automatic renewal in the live path only (i.e. the cache was stale
+			// enough to warrant a fresh fetch — a fresh cache hit never
+			// renews). The owning CLI refreshes with its own identity;
+			// ai-usage only launches it and inspects the file — it never
+			// parses or writes the refresh token itself. renew() skips
+			// missing/valid tokens internally (never launching) and runs under
+			// a cross-process lock. Never in --offline mode.
+			var renewalFailure string
+			if !o.offline {
+				if rc, ok := renewClient(p.ID()); ok {
+					results := renew.Renew(context.Background(), []renew.Client{rc}, time.Now())
+					if len(results) == 1 && results[0].Status == renew.StatusError {
+						renewalFailure = httpx.Redact(results[0].Reason)
+						if o.debug {
+							fmt.Fprintf(os.Stderr, "debug: renouvellement %s: %s\n", p.ID(), renewalFailure)
+						}
+					}
+				}
+			}
+
+			// Create the collection context only after renewal so a long
+			// refresh cannot consume the provider's own HTTP timeout, and use
+			// a goroutine-local timestamp so the collected/cached numbers
+			// reflect the post-renewal moment (never assign to the shared `now`
+			// captured by every goroutine).
+			fetchNow := time.Now()
 			ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
 			defer cancel()
 
 			r := p.Collect(ctx, provider.Options{
-				Now:     now,
+				Now:     fetchNow,
 				Offline: o.offline,
 				Verbose: o.verbose,
 				Debug:   o.debug,
 				HTTP:    client,
 			})
+
+			// Automatic renewal is best-effort. Preserve the established stale-data
+			// exit policy: a stale fallback still exits 0 unless --strict is set,
+			// while a provider with no usable data remains an error. Keep the
+			// renewal failure in the reason so the fallback is not silent.
+			if renewalFailure != "" && r.Status != provider.StatusOK {
+				if r.Reason == "" {
+					r.Reason = "renouvellement: " + renewalFailure
+				} else {
+					r.Reason = "renouvellement: " + renewalFailure + "; " + r.Reason
+				}
+			}
 
 			// The credential this entry belonged to no longer exists anywhere
 			// in $HOME. The cached figures describe a subscription that is not
@@ -263,8 +310,8 @@ func collect(ps []provider.Provider, c *cache.Cache, o options, now time.Time) [
 
 			// Sanity-check before caching so a drifted payload is never
 			// persisted as if it were good.
-			r.Validate(now)
-			c.Put(r, now)
+			r.Validate(fetchNow)
+			c.Put(r, fetchNow)
 			out[i] = r
 		}(i, p)
 	}
@@ -424,6 +471,19 @@ func exitCode(reports []provider.Report, o options) int {
 	return exitOK
 }
 
+// renewClient maps a provider id to its renewal client, so automatic renewal
+// knows how to refresh that provider's credential. Returns ok=false for
+// providers with no renewal path (API-key based, or not implemented).
+func renewClient(id string) (renew.Client, bool) {
+	switch id {
+	case "claude":
+		return renew.Claude(), true
+	case "chatgpt":
+		return renew.Codex(), true
+	}
+	return renew.Client{}, false
+}
+
 func useColor(o options) bool {
 	if o.noColor || o.colorArg == "never" {
 		return false
@@ -441,6 +501,98 @@ func useColor(o options) bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+// runRenew refreshes expired tokens for the requested renewable providers.
+// It only launches a CLI when a token is genuinely expired; valid tokens are
+// skipped. Returns exitOK unless a client failed (dead refresh token).
+func runRenew(args []string) int {
+	fs := flag.NewFlagSet("ai-usage renew", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "Usage: ai-usage renew [--only claude,chatgpt]\n\n"+
+			"Rafraîchit les access tokens expirés en lançant le CLI du fournisseur\n"+
+			"(claude -p 'OK' --model haiku, codex exec 'OK' -m luna) en mode print\n"+
+			"bas coût. Ne renouvelle que les tokens réellement expirés.\n")
+		fs.PrintDefaults()
+	}
+	only := fs.String("only", "", "limiter aux providers (claude,chatgpt)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitUsage
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "ai-usage renew: argument inattendu %q\n", fs.Arg(0))
+		fs.Usage()
+		return exitUsage
+	}
+
+	all := []renew.Client{renew.Claude(), renew.Codex()}
+
+	// Resolve --only robustly: every element must name a known renew provider;
+	// an unknown one is a hard error, never silently ignored.
+	knownID := func(c renew.Client, alias string) bool {
+		switch strings.ToLower(strings.TrimSpace(alias)) {
+		case c.ID, strings.ToLower(c.Name):
+			return true
+		case "codex", "openai":
+			return c.ID == "chatgpt"
+		}
+		return false
+	}
+	var clients []renew.Client
+	if *only != "" {
+		seen := map[string]bool{}
+		for _, raw := range strings.Split(*only, ",") {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				continue
+			}
+			found := false
+			for _, c := range all {
+				if knownID(c, name) && !seen[c.ID] {
+					seen[c.ID] = true
+					clients = append(clients, c)
+					found = true
+				}
+			}
+			if !found {
+				fmt.Fprintf(os.Stderr, "ai-usage renew: provider inconnu %q (renouvelables : claude,chatgpt/codex)\n", raw)
+				return exitUsage
+			}
+		}
+		if len(clients) == 0 {
+			fmt.Fprintln(os.Stderr, "ai-usage renew: --only ne sélectionne aucun provider")
+			return exitUsage
+		}
+	} else {
+		clients = all
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	results := renew.Renew(ctx, clients, time.Now())
+	failed := false
+	for _, r := range results {
+		switch r.Status {
+		case renew.StatusOK:
+			fmt.Printf("* %-8s ✓ renouvelé (%.0fs)\n", r.Name, r.Took.Seconds())
+		case renew.StatusAlreadyValid:
+			fmt.Printf("* %-8s — token non expiré, rien à faire\n", r.Name)
+		case renew.StatusUnconfigured:
+			fmt.Printf("* %-8s — aucun credential (%s)\n", r.Name, r.Reason)
+		default:
+			failed = true
+			fmt.Printf("* %-8s ⚠ %s (%.0fs)\n", r.Name, r.Reason, r.Took.Seconds())
+		}
+	}
+	if failed {
+		return exitFailure
+	}
+	return exitOK
+}
+
 func usage(fs *flag.FlagSet) {
 	fmt.Fprint(os.Stderr, `ai-usage — pourcentage d'usage de tes abonnements IA
 
@@ -448,7 +600,13 @@ Usage:
   ai-usage [flags]
 
 Lit les credentials déjà présents dans $HOME (claude, codex, pi, grok, opencode)
-en lecture seule, et n'écrit jamais dans les fichiers d'auth d'un autre outil.
+en lecture seule pour les rapports. Renouvelle automatiquement un access token
+expiré en lançant une fois le CLI du fournisseur (claude --model haiku /
+codex exec -m luna) dans le chemin live (jamais en --offline, jamais si le
+cache est frais) ; il n'écrit jamais le refresh token lui-même.
+
+Sous-commandes:
+  ai-usage renew              renouvelle manuellement les tokens expirés
 
 Flags:
 `)

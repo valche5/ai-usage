@@ -45,6 +45,7 @@ ai-usage --json               sortie machine (schema_version 1)
 ai-usage --offline            aucun appel réseau (voir plus bas)
 ai-usage --only claude,grok   filtrer
 ai-usage --check              diagnostic de dérive d'API
+ai-usage renew                renouveler manuellement les tokens expirés
 ai-usage --help               tous les flags
 ```
 
@@ -95,18 +96,50 @@ ChatGPT écrit aussi ses snapshots dans `~/.codex/sessions/**/rollout-*.jsonl` s
 orthographes, ne suppose jamais que `primary` vaut 5 h, et sélectionne par `limit_id`, jamais
 par position.
 
-## Lecture seule, strictement
+## Credentials et renouvellement
 
-**Aucun token n'est rafraîchi, réécrit ou journalisé.**
+**`ai-usage` ne lit, ne journalise et ne réécrit jamais un refresh token.**
 
-Rafraîchir un token OAuth fait tourner le refresh token côté serveur, ce qui invaliderait la
-copie détenue par `claude` / `codex` / `pi` / `grok` — et te déconnecterait de ton outil de
-travail. À l'expiration, `ai-usage` dégrade et dit quoi lancer (`claude`, `codex login`,
-`pi` puis `/login xai`).
+Quand un access token Claude ou Codex est expiré, le binaire délègue son renouvellement au
+CLI qui possède déjà le refresh token. Ce CLI peut alors mettre à jour son propre fichier de
+credentials ; `ai-usage` se contente de relire l'access token pour vérifier le résultat.
 
 Durées de vie constatées : Claude ~1 h, Grok ~6 h, Codex ~10 jours.
 
-Autres garde-fous :
+### Renouvellement automatique (renew)
+
+Depuis la version avec `internal/renew`, `ai-usage` peut **déclencher** le rafraîchissement —
+mais strictement en le **déléguant au CLI propriétaire du token**, jamais en le faisant lui-même :
+
+- Dans le **chemin live** de la collecte (i.e. le cache est assez périmé pour justifier un refetch),
+  si le token est **réellement expiré** (prédicat strict, sans la marge de sécurité de 60 s du
+  rapport), `ai-usage` lance le CLI du fournisseur en mode print non-interactif avec un modèle bon
+  marché. Cette invocation consomme tout de même une petite requête :
+  - `claude -p "OK" --model haiku`
+  - `codex exec "OK" -m luna --skip-git-repo-check`
+- Le refresh OAuth se produit au **bootstrap du CLI**, avant tout appel modèle ; le petit prompt ne
+  sert qu'à donner au CLI une raison d'atteindre ce bootstrap et de sortir tout seul.
+- Le CLI utilise **sa propre identité et son propre refresh token** ; `ai-usage` relit ensuite le
+  fichier pour confirmer que l'access token est redevenu utilisable. Il **ne touche jamais au
+  refresh token** lui-même.
+- Un verrou `flock` par provider (`~/.ai-usage/`) **sérialise les renouvellements entre processus** ;
+  après l'acquisition, le token est relu avant tout lancement. Ce verrou est pris avec le même
+  délai que le CLI. Sur une plateforme sans `flock` pris en charge, le renouvellement automatique
+  refuse de lancer le CLI et la collecte suit sa politique de fallback normale.
+- La cible est limitée au vrai fichier du CLI : pour Codex, uniquement `~/.codex/auth.json`, jamais
+  le fallback Pi. Les overrides `CODEX_HOME` / `CLAUDE_CONFIG_DIR` et les tokens d'environnement
+  sont retirés du child, et les deux CLIs démarrent depuis `~/.ai-usage/`, hors du projet courant.
+- **Jamais** si le cache est frais (un cache hit ne relance jamais), **jamais** en `--offline`
+  (statusline/prompt), **jamais** si le token n'est pas expiré.
+- Si le refresh token est mort (session OAuth expirée côté serveur), le CLI ne peut pas rafraîchir :
+  `ai-usage` le détecte (token toujours expiré après le run) et affiche **« please re-login »**
+  avec la commande à lancer — le flux web OAuth est la seule étape qui exige l'humain.
+- Le renouvellement automatique est best-effort : son échec est ajouté à la raison affichée,
+  puis la collecte conserve la politique historique. Une donnée stale sort en `0` par défaut
+  (`1` avec `--strict`) ; l'absence de toute donnée exploitable reste un échec.
+- Les exécutables `claude` et `codex` sont résolus depuis le `PATH` de confiance de l'utilisateur.
+
+Garde-fous de l'environnement inchangés :
 
 - Le fichier `~/.codex/auth.json` contient un `id_token` qui peut être **expiré de plusieurs
   jours** alors que l'`access_token` reste valide. La fraîcheur est lue dans le claim `exp` de

@@ -13,7 +13,7 @@ ChatGPT plus  moi@exemple.com
   weekly      ▓▓▓▓▓▓▓▓▓░░░░░░░  54%   reset mer. 13:28 (3j23h)
 
 Grok  moi@exemple.com
-  window      ▓▓░░░░░░░░░░░░░░  14%   reset mar. 21:36 (3j7h)
+  weekly      ▓▓░░░░░░░░░░░░░░  14%   reset mar. 21:36 (3j7h)
 
 Kimi  basic
   5h          ▓░░░░░░░░░░░░░░░   8%   reset 18:04 (4h24)
@@ -87,7 +87,7 @@ Le code est construit contre ça :
 |---|---|---|
 | Claude | `GET api.anthropic.com/api/oauth/usage` | `five_hour`/`seven_day`/`seven_day_{opus,sonnet}` → `{utilization 0-100, resets_at ISO}`, `extra_usage` |
 | ChatGPT | `GET chatgpt.com/backend-api/wham/usage` | `rate_limit.{primary,secondary}_window.{used_percent, limit_window_seconds, reset_at epoch s}`, `plan_type`, `credits` |
-| Grok | `POST grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` | gRPC-Web ; enveloppe champ 1 → `CreditsConfig` ; champ 1 float32 LE = % **consommé**, champ 5 = Timestamp du reset |
+| Grok | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` | `config.creditUsagePercent` = % **consommé**, `config.currentPeriod.end` = reset ISO |
 | Kimi | `GET api.kimi.com/coding/v1/usages` | `usage.{limit,used,remaining,resetTime}` (quota du plan), `limits[].{window.{duration,timeUnit},detail.{limit,used,remaining,resetTime}}`, `user.membership.level`, `user.userId` |
 | Copilot | `GET api.github.com/copilot_internal/user` | `copilot_plan`, `login`, `quota_reset_date`, `quota_snapshots.{premium_interactions,chat,completions}.{percent_remaining, unlimited, overage_permitted}` |
 
@@ -210,11 +210,6 @@ propriétaire n'est pas actionnable, un identifiant laid vaut mieux qu'un blanc.
 `--verbose` ajoute l'id complet (ce qui distingue deux comptes partageant un email) et le
 fichier de credentials retenu. `--json` expose `account` et `account_id`. `--short` reste une
 seule ligne de pourcentages : aucun compte n'y apparaît.
-
-## Crédits
-
-Le décodage de l'usage SuperGrok (endpoint, framing gRPC-Web, numéros de champs protobuf) est
-porté de `~/.pi/agent/extensions/xai-supergrok-usage.ts`.
 
 ## Alternative
 

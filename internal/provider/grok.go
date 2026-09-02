@@ -2,22 +2,21 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"time"
 
 	"github.com/valche5/ai-usage/internal/credstore"
-	"github.com/valche5/ai-usage/internal/grpcweb"
 	"github.com/valche5/ai-usage/internal/httpx"
 )
 
-// grokUsageURL is the Connect/gRPC-Web method behind grok.com/?_s=usage.
-const grokUsageURL = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig"
+// grokUsageURL is the JSON endpoint used by the Grok CLI's billing display.
+const grokUsageURL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
 
 // Grok reports SuperGrok subscription utilization.
-//
-// The endpoint, framing and header set come from the working reverse
-// engineering already in ~/.pi/agent/extensions/xai-supergrok-usage.ts.
 type Grok struct{}
 
 func (Grok) ID() string   { return "grok" }
@@ -66,18 +65,13 @@ func (g Grok) Collect(ctx context.Context, o Options) Report {
 	}
 
 	res, err := httpx.Do(ctx, o.HTTP, httpx.Req{
-		Method: http.MethodPost,
+		Method: http.MethodGet,
 		URL:    grokUsageURL,
 		Headers: map[string]string{
-			"authorization": "Bearer " + cred.Token,
-			"content-type":  "application/grpc-web+proto",
-			"x-grpc-web":    "1",
-			"x-user-agent":  "connect-es/2.1.1",
-			"origin":        "https://grok.com",
-			"referer":       "https://grok.com/?_s=usage",
-			"accept":        "*/*",
+			"Authorization":    "Bearer " + cred.Token,
+			"X-XAI-Token-Auth": "xai-grok-cli",
+			"Accept":           "application/json",
 		},
-		Body: grpcweb.EmptyMessage,
 	})
 	if err != nil {
 		base.Status = StatusError
@@ -94,7 +88,7 @@ func (g Grok) Collect(ctx context.Context, o Options) Report {
 		return base
 	}
 
-	credits, err := grpcweb.ParseCreditsConfig(res.Body)
+	credits, err := parseGrokBilling(res.Body)
 	if err != nil {
 		base.Status = StatusError
 		base.Reason = driftReason("réponse illisible : " + err.Error())
@@ -105,10 +99,61 @@ func (g Grok) Collect(ctx context.Context, o Options) Report {
 	base.Source = SourceLive
 	base.FetchedAt = o.Now
 	base.Windows = []Window{{
-		Key:         "window",
-		Label:       "window",
+		Key:         "weekly",
+		Label:       "weekly",
 		UsedPercent: credits.UsagePercent,
 		ResetsAt:    credits.ResetAt,
 	}}
 	return base
+}
+
+type grokBillingResponse struct {
+	Config *struct {
+		CurrentPeriod *struct {
+			Type  string `json:"type"`
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"currentPeriod"`
+		CreditUsagePercent float64 `json:"creditUsagePercent"`
+		BillingPeriodEnd   string  `json:"billingPeriodEnd"`
+	} `json:"config"`
+}
+
+type grokCredits struct {
+	UsagePercent float64
+	ResetAt      *time.Time
+}
+
+// parseGrokBilling decodes the JSON contract used by Grok CLI 1.0.13.
+// Protobuf JSON omits scalar zero values, so a missing creditUsagePercent in
+// an otherwise valid config is the legitimate representation of 0% usage.
+func parseGrokBilling(raw []byte) (grokCredits, error) {
+	var response grokBillingResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return grokCredits{}, fmt.Errorf("JSON invalide: %w", err)
+	}
+	if response.Config == nil {
+		return grokCredits{}, errors.New("champ config absent")
+	}
+	if math.IsNaN(response.Config.CreditUsagePercent) || math.IsInf(response.Config.CreditUsagePercent, 0) {
+		return grokCredits{}, errors.New("creditUsagePercent non numérique")
+	}
+
+	end := response.Config.BillingPeriodEnd
+	if response.Config.CurrentPeriod != nil && response.Config.CurrentPeriod.End != "" {
+		end = response.Config.CurrentPeriod.End
+	}
+	var resetAt *time.Time
+	if end != "" {
+		t, err := time.Parse(time.RFC3339Nano, end)
+		if err != nil {
+			return grokCredits{}, fmt.Errorf("date de reset invalide: %w", err)
+		}
+		resetAt = &t
+	}
+
+	return grokCredits{
+		UsagePercent: response.Config.CreditUsagePercent,
+		ResetAt:      resetAt,
+	}, nil
 }

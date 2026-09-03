@@ -480,6 +480,8 @@ func renewClient(id string) (renew.Client, bool) {
 		return renew.Claude(), true
 	case "chatgpt":
 		return renew.Codex(), true
+	case "grok":
+		return renew.Grok(), true
 	}
 	return renew.Client{}, false
 }
@@ -508,13 +510,13 @@ func runRenew(args []string) int {
 	fs := flag.NewFlagSet("ai-usage renew", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "Usage: ai-usage renew [--only claude,chatgpt]\n\n"+
+		fmt.Fprint(os.Stderr, "Usage: ai-usage renew [--only claude,chatgpt,grok]\n\n"+
 			"Rafraîchit les access tokens expirés en lançant le CLI du fournisseur\n"+
-			"(claude -p 'OK' --model haiku, codex exec 'OK' -m luna) en mode print\n"+
+			"(claude -p 'OK' --model haiku, codex exec 'OK' -m luna, grok -p 'OK') en mode print\n"+
 			"bas coût. Ne renouvelle que les tokens réellement expirés.\n")
 		fs.PrintDefaults()
 	}
-	only := fs.String("only", "", "limiter aux providers (claude,chatgpt)")
+	only := fs.String("only", "", "limiter aux providers (claude,chatgpt,grok)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -527,7 +529,7 @@ func runRenew(args []string) int {
 		return exitUsage
 	}
 
-	all := []renew.Client{renew.Claude(), renew.Codex()}
+	all := []renew.Client{renew.Claude(), renew.Codex(), renew.Grok()}
 
 	// Resolve --only robustly: every element must name a known renew provider;
 	// an unknown one is a hard error, never silently ignored.
@@ -557,7 +559,7 @@ func runRenew(args []string) int {
 				}
 			}
 			if !found {
-				fmt.Fprintf(os.Stderr, "ai-usage renew: provider inconnu %q (renouvelables : claude,chatgpt/codex)\n", raw)
+				fmt.Fprintf(os.Stderr, "ai-usage renew: provider inconnu %q (renouvelables : claude,chatgpt/codex,grok/xai)\n", raw)
 				return exitUsage
 			}
 		}

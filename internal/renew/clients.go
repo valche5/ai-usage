@@ -54,6 +54,20 @@ func Codex() Client {
 	}
 }
 
+// Grok returns the client that renews the xAI subscription token via the grok
+// CLI. The single-turn prompt triggers the OAuth bootstrap refresh on startup.
+func Grok() Client {
+	return Client{
+		ID:      "grok",
+		Name:    "Grok",
+		Relogin: "grok login",
+		cred:    readGrokCred,
+		Cmd: func() *exec.Cmd {
+			return cliCommand(grokBin(), "-p", "OK", "-m", "grok-3-fast")
+		},
+	}
+}
+
 // readClaudeCred reads the claude credential. A present-but-malformed file is
 // surfaced distinctly from a missing one so we can report it as an error
 // rather than as an unconfigured skip.
@@ -105,6 +119,31 @@ func readCodexCLI() (credstore.Cred, bool, error) {
 	return c, true, nil
 }
 
+// readGrokCred reads the first xAI credential from ~/.grok/auth.json (the grok
+// CLI's own file, not the pi fallback), so renewal targets exactly what the
+// grok binary refreshes.
+func readGrokCred() (credstore.Cred, bool, error) {
+	cands, err := credstore.Grok()
+	if errors.Is(err, credstore.ErrMissing) {
+		return credstore.Cred{}, false, nil
+	}
+	if err != nil {
+		return credstore.Cred{}, false, err
+	}
+	// Prefer the grok CLI's own credential (keyed by auth.x.ai issuer) over
+	// the pi fallback, since that is what `grok` will refresh.
+	for _, c := range cands {
+		if strings.Contains(c.Path, ".grok/auth.json") {
+			return c, true, nil
+		}
+	}
+	// Fallback: first candidate (likely pi).
+	if len(cands) > 0 {
+		return cands[0], true, nil
+	}
+	return credstore.Cred{}, false, nil
+}
+
 // claudeBin resolves the installed claude binary from PATH, keeping the
 // invoked version aligned with the one whose User-Agent the usage endpoint
 // expects.
@@ -120,6 +159,13 @@ func codexBin() string {
 		return p
 	}
 	return "codex"
+}
+
+func grokBin() string {
+	if p, err := exec.LookPath("grok"); err == nil {
+		return p
+	}
+	return "grok"
 }
 
 // cliCommand aligns the child with the default credential locations inspected
@@ -141,8 +187,11 @@ var cliEnvDenied = map[string]struct{}{
 	"CLAUDE_CODE_OAUTH_TOKEN": {},
 	"CLAUDE_CONFIG_DIR":       {},
 	"CODEX_HOME":              {},
+	"GROK_CONFIG_DIR":         {},
+	"GROK_HOME":               {},
 	"OPENAI_API_KEY":          {},
 	"OPENAI_BASE_URL":         {},
+	"XAI_API_KEY":             {},
 }
 
 func scrubCLIEnv(env []string) []string {

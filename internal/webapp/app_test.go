@@ -170,6 +170,26 @@ func TestPostAcceptsNullOriginWithCSRF(t *testing.T) {
 	}
 }
 
+func TestDashboardDefaultsToReadMode(t *testing.T) {
+	app, store := testApp(t)
+	if err := store.Put(connection.Connection{ID: "copilot:11", Provider: "copilot", Kind: "oauth", Access: "token", Email: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	authenticate(t, app, req)
+	res := httptest.NewRecorder()
+	app.Handler().ServeHTTP(res, req)
+	body := res.Body.String()
+	for _, want := range []string{`id="edit-button"`, "Éditer", `body.editing .actions{display:flex}`, `data-add-account`, "Ajouter un compte"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dashboard missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<body class="editing"`) {
+		t.Fatal("dashboard started in edit mode")
+	}
+}
+
 func TestDashboardRendersTypedReportStatus(t *testing.T) {
 	app, store := testApp(t)
 	reset := time.Now().Add(time.Hour)

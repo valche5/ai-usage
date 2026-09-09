@@ -173,6 +173,9 @@ La sauvegarde est inutilisable sans la clé. À l'inverse, perdre cette clé imp
 toutes les autorisations OAuth ; conserve-la donc dans ton gestionnaire de secrets ou de mots
 de passe avant le passage en production.
 
+Le dashboard s'ouvre en lecture seule. **Éditer** affiche les boutons Connecter / Déconnecter
+et les champs de clé API ; **Terminé** les masque à nouveau.
+
 Pour ChatGPT, Grok et Copilot, **Connecter** affiche une URL et un code court. La validation
 peut être faite depuis n'importe quel navigateur : aucun callback vers le container ni aucun
 port entrant supplémentaire n'est nécessaire.

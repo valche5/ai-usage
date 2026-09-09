@@ -87,12 +87,19 @@ Chaque push sur `main` déclenche aussi le workflow Gitea Actions
 gitea.valche5.fr/valche5/ai-usage:latest
 ```
 
-Le registre Gitea n'accepte pas le `GITEA_TOKEN` temporaire d'un job Actions pour cette
-opération. Il faut créer un PAT depuis **Settings → Applications → Manage Access Tokens** avec
-la permission **Packages: Read and Write**, puis enregistrer sa valeur dans le secret Actions
-du dépôt nommé `REGISTRY_TOKEN`. Le nom d'utilisateur Gitea doit être enregistré dans un
-second secret nommé `REGISTRY_USERNAME`. Le workflow utilise ces deux secrets pour le login
-au registre.
+Le registre Gitea n'accepte pas le `GITEA_TOKEN` temporaire d'un job Actions, ni le mot de
+passe du compte. Il faut un **PAT** créé depuis **Settings → Applications → Manage Access
+Tokens** avec **Packages: Read and Write**.
+
+Ces valeurs sont des **secrets du dépôt** `valche5/ai-usage` (pas ceux de `downloader`) :
+
+1. `https://gitea.valche5.fr/valche5/ai-usage/settings/actions/secrets`
+2. `REGISTRY_USERNAME` = `valche5`
+3. `REGISTRY_TOKEN` = le PAT (recréer le secret s'il existe déjà : Gitea ne montre plus la valeur)
+
+Si le login échoue en `401`, les logs Gitea montrent `user's password is invalid` : le secret
+n'est pas un PAT valide pour `valche5`. Copier le même PAT que `downloader`, ou en créer un
+nouveau.
 
 Il faut également activer Actions sur le dépôt et disposer d'un runner `ubuntu-latest`
 capable de lancer Docker. Après l'ajout du secret, relance le job échoué ou démarre le workflow

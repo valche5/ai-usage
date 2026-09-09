@@ -90,8 +90,9 @@ gitea.valche5.fr/valche5/ai-usage:latest
 Le registre Gitea n'accepte pas le `GITEA_TOKEN` temporaire d'un job Actions pour cette
 opération. Il faut créer un PAT depuis **Settings → Applications → Manage Access Tokens** avec
 la permission **Packages: Read and Write**, puis enregistrer sa valeur dans le secret Actions
-du dépôt nommé `REGISTRY_TOKEN`. Le workflow utilise `valche5` comme nom d'utilisateur et ce
-PAT comme mot de passe ; il ne demande au jeton automatique que la lecture du dépôt.
+du dépôt nommé `REGISTRY_TOKEN`. Le nom d'utilisateur Gitea doit être enregistré dans un
+second secret nommé `REGISTRY_USERNAME`. Le workflow utilise ces deux secrets pour le login
+au registre.
 
 Il faut également activer Actions sur le dépôt et disposer d'un runner `ubuntu-latest`
 capable de lancer Docker. Après l'ajout du secret, relance le job échoué ou démarre le workflow

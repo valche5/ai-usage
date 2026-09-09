@@ -80,6 +80,23 @@ podman run --detach --replace \
   localhost/ai-usage-web:local
 ```
 
+Chaque push sur `main` déclenche aussi le workflow Gitea Actions
+`.gitea/workflows/container.yml`, qui publie l'image suivante :
+
+```text
+gitea.valche5.fr/valche5/ai-usage:latest
+```
+
+Le workflow utilise le `GITEA_TOKEN` temporaire fourni par Gitea, avec uniquement les
+permissions de lecture du dépôt et d'écriture des packages. Il faut activer Actions sur le
+dépôt, disposer d'un runner `ubuntu-latest` capable de lancer Docker, et autoriser au maximum
+la permission **Packages: Read and Write** dans **Settings → Actions → General**. Aucun secret
+de registre supplémentaire n'est nécessaire. L'image peut ensuite être récupérée avec :
+
+```sh
+podman pull gitea.valche5.fr/valche5/ai-usage:latest
+```
+
 Le dashboard écoute par défaut sur <http://127.0.0.1:8080>. Une page de connexion demande
 uniquement le mot de passe puis crée une session aléatoire conservée en mémoire. Le cookie est
 `HttpOnly` et `SameSite=Strict` ; toutes les sessions expirent au redémarrage sans affecter les

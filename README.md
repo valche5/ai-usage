@@ -87,11 +87,15 @@ Chaque push sur `main` déclenche aussi le workflow Gitea Actions
 gitea.valche5.fr/valche5/ai-usage:latest
 ```
 
-Le workflow utilise le `GITEA_TOKEN` temporaire fourni par Gitea, avec uniquement les
-permissions de lecture du dépôt et d'écriture des packages. Il faut activer Actions sur le
-dépôt, disposer d'un runner `ubuntu-latest` capable de lancer Docker, et autoriser au maximum
-la permission **Packages: Read and Write** dans **Settings → Actions → General**. Aucun secret
-de registre supplémentaire n'est nécessaire. L'image peut ensuite être récupérée avec :
+Le registre Gitea n'accepte pas le `GITEA_TOKEN` temporaire d'un job Actions pour cette
+opération. Il faut créer un PAT depuis **Settings → Applications → Manage Access Tokens** avec
+la permission **Packages: Read and Write**, puis enregistrer sa valeur dans le secret Actions
+du dépôt nommé `REGISTRY_TOKEN`. Le workflow utilise `valche5` comme nom d'utilisateur et ce
+PAT comme mot de passe ; il ne demande au jeton automatique que la lecture du dépôt.
+
+Il faut également activer Actions sur le dépôt et disposer d'un runner `ubuntu-latest`
+capable de lancer Docker. Après l'ajout du secret, relance le job échoué ou démarre le workflow
+manuellement depuis l'onglet Actions. L'image peut ensuite être récupérée avec :
 
 ```sh
 podman pull gitea.valche5.fr/valche5/ai-usage:latest

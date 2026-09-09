@@ -11,11 +11,12 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}"
     && touch /out/data/.keep \
     && chmod 0700 /out/data
 
+# Rootless Podman maps container uid 0 to the host user. A USER 65532
+# instruction would run as a subuid and break the /data volume.
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build --chown=65532:65532 /out/data /data
-COPY --from=build --chown=65532:65532 /out/ai-usage-web /ai-usage-web
-USER 65532:65532
+COPY --from=build /out/data /data
+COPY --from=build /out/ai-usage-web /ai-usage-web
 EXPOSE 8080
 VOLUME ["/data"]
 ENTRYPOINT ["/ai-usage-web"]

@@ -67,13 +67,16 @@ cp .env.example .env
 openssl rand -base64 32
 # Copier le résultat dans AI_USAGE_ENCRYPTION_KEY.
 
+mkdir -p ~/.local/share/ai-usage
+chmod 700 ~/.local/share/ai-usage
 podman build -t localhost/ai-usage-web:local .
-podman volume create ai-usage-data
 podman run --detach --replace \
   --name ai-usage-web \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
   --env-file .env \
   --publish 127.0.0.1:8080:8080 \
-  --volume ai-usage-data:/data \
+  --volume "$HOME/.local/share/ai-usage:/data" \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges \
@@ -119,8 +122,9 @@ Pour une installation durable, les fichiers de l'exemple Quadlet permettent à s
 gérer le démarrage et les redémarrages du conteneur rootless :
 
 ```sh
-mkdir -p ~/.config/containers/systemd
-cp deploy/ai-usage.container deploy/ai-usage-data.volume ~/.config/containers/systemd/
+mkdir -p ~/.local/share/ai-usage ~/.config/containers/systemd
+chmod 700 ~/.local/share/ai-usage
+cp deploy/ai-usage.container ~/.config/containers/systemd/
 cp .env ~/.config/containers/systemd/ai-usage.env
 chmod 600 ~/.config/containers/systemd/ai-usage.env
 systemctl --user daemon-reload
@@ -140,24 +144,29 @@ doit rester en mode `0600`. Le lancement de l'environnement de test se fait avec
 ./deploy/test-up.sh
 ```
 
-Le script conserve `/data/state.enc` dans le volume Podman nommé `ai-usage-data`. Les OAuth ne
-sont donc pas perdus lors d'un rebuild ou du remplacement du conteneur. Pour passer en prod
-sur le même hôte, réutilise ce volume et recopie exactement `AI_USAGE_ENCRYPTION_KEY` depuis
-`.env.test` dans l'environnement de production. Le mot de passe web peut, lui, être changé.
+Le script conserve `/data/state.enc` dans `~/.local/share/ai-usage` sur l'hôte (bind mount,
+`UserNS=keep-id`). Les OAuth ne sont donc pas perdus lors d'un rebuild ou du remplacement du
+conteneur. Si un ancien volume Podman `ai-usage-data` existe encore et que le répertoire hôte
+est vide, `test-up.sh` en copie `state.enc` une fois. Pour passer en prod sur le même hôte,
+réutilise ce répertoire et recopie exactement `AI_USAGE_ENCRYPTION_KEY` depuis `.env.test`
+dans l'environnement de production. Le mot de passe web peut, lui, être changé.
 
-Pour déplacer l'état vers un autre hôte, arrête brièvement le service puis exporte le volume :
+Pour déplacer l'état vers un autre hôte, arrête brièvement le service puis archive le
+répertoire :
 
 ```sh
 podman stop ai-usage-web
-podman volume export ai-usage-data --output ai-usage-data.tar
+tar -C ~/.local/share -czf ai-usage-data.tar.gz ai-usage
 podman start ai-usage-web
 ```
 
-Sur le nouvel hôte, copie séparément l'archive et la clé de chiffrement, puis importe l'état :
+Sur le nouvel hôte, copie séparément l'archive et la clé de chiffrement, puis restaure :
 
 ```sh
-podman volume create ai-usage-data
-podman volume import ai-usage-data ai-usage-data.tar
+mkdir -p ~/.local/share
+tar -C ~/.local/share -xzf ai-usage-data.tar.gz
+chmod 700 ~/.local/share/ai-usage
+chmod 600 ~/.local/share/ai-usage/state.enc
 ```
 
 La sauvegarde est inutilisable sans la clé. À l'inverse, perdre cette clé impose de refaire
@@ -176,7 +185,7 @@ automatiquement sans refaire OAuth.
 
 Les access tokens, refresh tokens et derniers rapports sont stockés ensemble dans
 `/data/state.enc`, chiffré en AES-256-GCM. La clé de chiffrement n'est jamais écrite dans ce
-volume. Le serveur accepte aussi `AI_USAGE_PASSWORD_FILE` et
+répertoire. Le serveur accepte aussi `AI_USAGE_PASSWORD_FILE` et
 `AI_USAGE_ENCRYPTION_KEY_FILE` pour monter ces deux valeurs comme Docker secrets plutôt que
 comme variables d'environnement. Une perte de la clé rend volontairement le fichier
 irrécupérable.

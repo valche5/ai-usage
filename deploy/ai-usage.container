@@ -10,7 +10,9 @@ EnvironmentFile=%h/.config/containers/systemd/ai-usage.env
 Environment=AI_USAGE_ADDR=:8080
 Environment=AI_USAGE_DATA_DIR=/data
 PublishPort=127.0.0.1:8080:8080
-Volume=ai-usage-data.volume:/data
+UserNS=keep-id
+User=%U:%G
+Volume=%h/.local/share/ai-usage:/data
 ReadOnly=true
 NoNewPrivileges=true
 DropCapability=all

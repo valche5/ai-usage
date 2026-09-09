@@ -2,12 +2,15 @@ BIN     := ai-usage
 PREFIX  ?= $(HOME)/.local
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: all build install uninstall test vet fmt check clean release snapshot
+.PHONY: all build build-web install uninstall test vet fmt check clean release snapshot
 
 all: build
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o $(BIN) ./cmd/ai-usage
+
+build-web:
+	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o ai-usage-web ./cmd/ai-usage-web
 
 install: build
 	mkdir -p $(PREFIX)/bin
@@ -36,5 +39,5 @@ release:
 	goreleaser release --clean
 
 clean:
-	rm -f $(BIN)
+	rm -f $(BIN) ai-usage-web
 	rm -rf dist

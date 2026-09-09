@@ -1,4 +1,9 @@
 /ai-usage
+/ai-usage-web
+/.ai-usage-web/
+/.env
+/.env.*
+!/.env.example
 /dist/
 *.raw.json
 /dump/

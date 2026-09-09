@@ -33,12 +33,17 @@ const (
 
 // Window is one quota window (a 5-hour bucket, a weekly bucket, ...).
 type Window struct {
-	Key           string     `json:"key"`
-	Label         string     `json:"label"`
-	UsedPercent   float64    `json:"used_percent"`
-	ResetsAt      *time.Time `json:"resets_at,omitempty"`
-	WindowMinutes int        `json:"window_minutes,omitempty"`
-	Unlimited     bool       `json:"unlimited,omitempty"`
+	Key             string     `json:"key"`
+	Label           string     `json:"label"`
+	UsedPercent     float64    `json:"used_percent"`
+	ResetsAt        *time.Time `json:"resets_at,omitempty"`
+	WindowMinutes   int        `json:"window_minutes,omitempty"`
+	Unlimited       bool       `json:"unlimited,omitempty"`
+	RemainingAmount *float64   `json:"remaining_amount,omitempty"`
+	TotalAmount     *float64   `json:"total_amount,omitempty"`
+	Currency        string     `json:"currency,omitempty"`
+	UsedCount       *float64   `json:"used_count,omitempty"`
+	TotalCount      *float64   `json:"total_count,omitempty"`
 }
 
 // Report is the normalized result for one provider. It is the only thing we
@@ -151,6 +156,15 @@ func (r *Report) Validate(now time.Time) {
 
 	for i := range r.Windows {
 		w := &r.Windows[i]
+		if w.RemainingAmount != nil {
+			switch amount := *w.RemainingAmount; {
+			case math.IsNaN(amount) || math.IsInf(amount, 0):
+				r.warn("%s : solde non numérique — forme de réponse inattendue", w.Label)
+				w.RemainingAmount = nil
+			case amount < 0:
+				r.warn("%s : solde négatif (%.2f) — l'API a probablement changé", w.Label, amount)
+			}
+		}
 
 		if math.IsNaN(w.UsedPercent) || math.IsInf(w.UsedPercent, 0) {
 			r.warn("%s : pourcentage non numérique — forme de réponse inattendue", w.Label)

@@ -27,14 +27,24 @@ const codexUsageURL = "https://chatgpt.com/backend-api/wham/usage"
 // also carry unrelated ids such as "codex_bengalfox".
 const codexLimitID = "codex"
 
-// Codex reports ChatGPT subscription utilization.
-type Codex struct{}
+// Codex reports ChatGPT subscription utilization. Credentials is optional:
+// the CLI leaves it nil, while the web service injects its encrypted session.
+type Codex struct {
+	Credentials func(time.Time) ([]credstore.Cred, error)
+}
 
 func (Codex) ID() string   { return "chatgpt" }
 func (Codex) Name() string { return "ChatGPT" }
 
-func (Codex) Fingerprint(now time.Time) string {
-	cands, err := credstore.Codex()
+func (c Codex) credentials(now time.Time) ([]credstore.Cred, error) {
+	if c.Credentials != nil {
+		return c.Credentials(now)
+	}
+	return credstore.Codex()
+}
+
+func (c Codex) Fingerprint(now time.Time) string {
+	cands, err := c.credentials(now)
 	if err != nil {
 		return ""
 	}
@@ -43,7 +53,7 @@ func (Codex) Fingerprint(now time.Time) string {
 }
 
 func (c Codex) Collect(ctx context.Context, o Options) Report {
-	cands, err := credstore.Codex()
+	cands, err := c.credentials(o.Now)
 	switch {
 	case errors.Is(err, credstore.ErrAPIKeyMode):
 		return Unconfigured(c.ID(), c.Name(), "codex est en mode clé API — pas d'usage d'abonnement")

@@ -1,0 +1,8 @@
+.git
+.env
+.ai-usage-web
+ai-usage
+ai-usage-web
+dist
+dump
+*.raw.json

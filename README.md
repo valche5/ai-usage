@@ -54,9 +54,133 @@ Codes de sortie : `0` tout va bien · `1` un provider en échec, une dérive dé
 
 `--fail-over 80` sort en échec dès qu'une fenêtre dépasse 80 % — pratique en cron.
 
+## Service web homelab
+
+`ai-usage-web` est un dashboard mono-utilisateur conçu pour tourner avec Podman. Il gère
+directement les connexions OAuth headless de ChatGPT, Grok et GitHub Copilot, ainsi que les
+clés OpenRouter et OpenCode. Claude et Kimi restent volontairement réservés au CLI local pour
+le moment.
+
+```sh
+cp .env.example .env
+# Choisir un mot de passe long dans .env, puis générer la clé de chiffrement :
+openssl rand -base64 32
+# Copier le résultat dans AI_USAGE_ENCRYPTION_KEY.
+
+podman build -t localhost/ai-usage-web:local .
+podman volume create ai-usage-data
+podman run --detach --replace \
+  --name ai-usage-web \
+  --env-file .env \
+  --publish 127.0.0.1:8080:8080 \
+  --volume ai-usage-data:/data \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  localhost/ai-usage-web:local
+```
+
+Le dashboard écoute par défaut sur <http://127.0.0.1:8080>. Une page de connexion demande
+uniquement le mot de passe puis crée une session aléatoire conservée en mémoire. Le cookie est
+`HttpOnly` et `SameSite=Strict` ; toutes les sessions expirent au redémarrage sans affecter les
+OAuth chiffrés. Pour exposer le service sur le LAN, change l'adresse du flag `--publish`, de
+préférence derrière un reverse proxy HTTPS.
+
+Pour une installation durable, les fichiers de l'exemple Quadlet permettent à systemd de
+gérer le démarrage et les redémarrages du conteneur rootless :
+
+```sh
+mkdir -p ~/.config/containers/systemd
+cp deploy/ai-usage.container deploy/ai-usage-data.volume ~/.config/containers/systemd/
+cp .env ~/.config/containers/systemd/ai-usage.env
+chmod 600 ~/.config/containers/systemd/ai-usage.env
+systemctl --user daemon-reload
+systemctl --user enable --now ai-usage.service
+```
+
+Pour conserver le service lorsque la session utilisateur est fermée, active le lingering une
+fois avec `loginctl enable-linger "$USER"`.
+
+### Test via Tailscale et réutilisation des OAuth
+
+Le fichier local `.env.test` contient l'adresse Tailscale de publication, un mot de passe de
+test aléatoire et surtout une clé de chiffrement aléatoire stable. Il est ignoré par Git et
+doit rester en mode `0600`. Le lancement de l'environnement de test se fait avec :
+
+```sh
+./deploy/test-up.sh
+```
+
+Le script conserve `/data/state.enc` dans le volume Podman nommé `ai-usage-data`. Les OAuth ne
+sont donc pas perdus lors d'un rebuild ou du remplacement du conteneur. Pour passer en prod
+sur le même hôte, réutilise ce volume et recopie exactement `AI_USAGE_ENCRYPTION_KEY` depuis
+`.env.test` dans l'environnement de production. Le mot de passe web peut, lui, être changé.
+
+Pour déplacer l'état vers un autre hôte, arrête brièvement le service puis exporte le volume :
+
+```sh
+podman stop ai-usage-web
+podman volume export ai-usage-data --output ai-usage-data.tar
+podman start ai-usage-web
+```
+
+Sur le nouvel hôte, copie séparément l'archive et la clé de chiffrement, puis importe l'état :
+
+```sh
+podman volume create ai-usage-data
+podman volume import ai-usage-data ai-usage-data.tar
+```
+
+La sauvegarde est inutilisable sans la clé. À l'inverse, perdre cette clé impose de refaire
+toutes les autorisations OAuth ; conserve-la donc dans ton gestionnaire de secrets ou de mots
+de passe avant le passage en production.
+
+Pour ChatGPT, Grok et Copilot, **Connecter** affiche une URL et un code court. La validation
+peut être faite depuis n'importe quel navigateur : aucun callback vers le container ni aucun
+port entrant supplémentaire n'est nécessaire.
+
+Copilot accepte plusieurs comptes. Chaque autorisation est identifiée par l'identifiant GitHub
+stable et stockée séparément sous `copilot:<github_user_id>`. Le dashboard conserve donc un
+bouton **Ajouter un compte** et permet de consulter ou déconnecter chaque abonnement
+indépendamment. Une ancienne connexion stockée sous la clé unique `copilot` est migrée
+automatiquement sans refaire OAuth.
+
+Les access tokens, refresh tokens et derniers rapports sont stockés ensemble dans
+`/data/state.enc`, chiffré en AES-256-GCM. La clé de chiffrement n'est jamais écrite dans ce
+volume. Le serveur accepte aussi `AI_USAGE_PASSWORD_FILE` et
+`AI_USAGE_ENCRYPTION_KEY_FILE` pour monter ces deux valeurs comme Docker secrets plutôt que
+comme variables d'environnement. Une perte de la clé rend volontairement le fichier
+irrécupérable.
+
+L'API normalisée est disponible sur `GET /api/reports` avec le même cookie de session. Elle n'expose
+ni tokens, ni refresh tokens, ni empreintes de credentials. Le dashboard ouvre une connexion
+WebSocket authentifiée : tant qu'au moins un client est présent, le serveur actualise les
+données selon les TTL des providers et pousse chaque nouvel état à tous les clients. Sans
+client, les appels sortants sont suspendus. Le bouton **Actualiser** demande une collecte
+forcée sur cette même connexion et `last_refresh` indique la fin du dernier cycle.
+
+Variables principales :
+
+| Variable | Défaut | Rôle |
+|---|---:|---|
+| `AI_USAGE_ADDR` | `:8080` | adresse d'écoute dans le container |
+| `AI_USAGE_DATA_DIR` | `.ai-usage-web` | répertoire du fichier chiffré (`/data` dans le conteneur) |
+| `AI_USAGE_PASSWORD` | — | mot de passe obligatoire |
+| `AI_USAGE_SESSION_TTL` | `168h` | durée d'une session web conservée en mémoire (7 jours) |
+| `AI_USAGE_ENCRYPTION_KEY` | — | clé obligatoire, 32 octets en base64 |
+| `AI_USAGE_REFRESH_INTERVAL` | `1m` | fréquence d'actualisation tant qu'un client WebSocket est connecté ; les TTL provider restent appliqués |
+| `AI_USAGE_HTTP_TIMEOUT` | `10s` | timeout de chaque appel sortant |
+| `TZ` | `Europe/Paris` dans `.env.example` | fuseau utilisé pour les dates affichées |
+
+Les client IDs des applications publiques observées dans OpenCode sont les valeurs par défaut.
+Ils peuvent être remplacés par `AI_USAGE_OPENAI_CLIENT_ID`, `AI_USAGE_XAI_CLIENT_ID` et
+`AI_USAGE_GITHUB_CLIENT_ID`. `AI_USAGE_GITHUB_API` permet aussi de remplacer l'URL de l'API
+GitHub utilisée pour identifier les comptes. Le protocole est inspiré des plugins OpenCode sous licence MIT ;
+voir [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Le risque principal : ces APIs ne sont pas documentées
 
-Les cinq endpoints sont internes. Ils peuvent changer sans préavis, et le pire scénario
+Les endpoints interrogés sont internes. Ils peuvent changer sans préavis, et le pire scénario
 n'est pas la panne — c'est un **chiffre plausible mais faux** (un champ renommé, une échelle
 qui passe de 0-100 à 0-1, « consommé » qui devient « restant »).
 
@@ -88,8 +212,9 @@ Le code est construit contre ça :
 | Claude | `GET api.anthropic.com/api/oauth/usage` | `five_hour`/`seven_day`/`seven_day_{opus,sonnet}` → `{utilization 0-100, resets_at ISO}`, `extra_usage` |
 | ChatGPT | `GET chatgpt.com/backend-api/wham/usage` | `rate_limit.{primary,secondary}_window.{used_percent, limit_window_seconds, reset_at epoch s}`, `plan_type`, `credits` |
 | Grok | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` | `config.creditUsagePercent` = % **consommé**, `config.currentPeriod.end` = reset ISO |
+| OpenRouter | `GET openrouter.ai/api/v1/credits` | `data.total_credits - data.total_usage` = crédit restant en USD |
 | Kimi | `GET api.kimi.com/coding/v1/usages` | `usage.{limit,used,remaining,resetTime}` (quota du plan), `limits[].{window.{duration,timeUnit},detail.{limit,used,remaining,resetTime}}`, `user.membership.level`, `user.userId` |
-| Copilot | `GET api.github.com/copilot_internal/user` | `copilot_plan`, `login`, `quota_reset_date`, `quota_snapshots.{premium_interactions,chat,completions}.{percent_remaining, unlimited, overage_permitted}` |
+| Copilot | `GET api.github.com/copilot_internal/user` | `copilot_plan`, `login`, `quota_reset_date`, `quota_snapshots.premium_interactions.{percent_remaining, entitlement, remaining, unlimited, overage_permitted}` ; chat et complétions sont masqués |
 
 ChatGPT écrit aussi ses snapshots dans `~/.codex/sessions/**/rollout-*.jsonl` sous une forme
 **différente** (`rate_limits.primary.window_minutes`) : le parseur accepte les deux

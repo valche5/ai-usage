@@ -263,15 +263,26 @@ func Table(reports []provider.Report, o Opts) string {
 			continue
 		}
 		for _, w := range r.Windows {
+			if w.RemainingAmount != nil {
+				line := fmt.Sprintf("  %-*s %s restant", labelW, w.Label, formatAmount(*w.RemainingAmount, w.Currency))
+				if w.TotalAmount != nil {
+					line += " sur " + formatAmount(*w.TotalAmount, w.Currency)
+				}
+				b.WriteString(line + "\n")
+				continue
+			}
 			if w.Unlimited {
 				b.WriteString(fmt.Sprintf("  %-*s %s\n", labelW, w.Label, o.paint(green, "illimité")))
 				continue
 			}
-			b.WriteString(fmt.Sprintf("  %-*s %s %3.0f%%   %s\n",
+			line := fmt.Sprintf("  %-*s %s %3.0f%%",
 				labelW, w.Label,
 				Bar(w.UsedPercent, o.barWidth(), o.Color, o),
-				w.UsedPercent,
-				o.resetText(w)))
+				w.UsedPercent)
+			if w.UsedCount != nil && w.TotalCount != nil {
+				line += fmt.Sprintf("   %.0f/%.0f crédits", *w.UsedCount, *w.TotalCount)
+			}
+			b.WriteString(line + "   " + o.resetText(w) + "\n")
 		}
 		for _, n := range r.Notes {
 			b.WriteString("  " + o.paint(dim, n) + "\n")
@@ -299,11 +310,19 @@ func Short(reports []provider.Report, o Opts) string {
 		}
 		nums := make([]string, 0, len(r.Windows))
 		for _, w := range r.Windows {
+			if w.RemainingAmount != nil {
+				nums = append(nums, formatAmount(*w.RemainingAmount, w.Currency))
+				continue
+			}
 			if w.Unlimited {
 				nums = append(nums, "∞")
 				continue
 			}
-			nums = append(nums, fmt.Sprintf("%.0f%%", w.UsedPercent))
+			value := fmt.Sprintf("%.0f%%", w.UsedPercent)
+			if w.UsedCount != nil && w.TotalCount != nil {
+				value += fmt.Sprintf(" %.0f/%.0f", *w.UsedCount, *w.TotalCount)
+			}
+			nums = append(nums, value)
 		}
 		s := strings.ToLower(r.Name) + " " + strings.Join(nums, "/")
 		if r.Degraded() {
@@ -318,6 +337,13 @@ func Short(reports []provider.Report, o Opts) string {
 		parts = append(parts, o.paint(o.colorFor(worst), s))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func formatAmount(value float64, currency string) string {
+	if strings.EqualFold(currency, "USD") {
+		return fmt.Sprintf("$%.2f", value)
+	}
+	return fmt.Sprintf("%.2f %s", value, currency)
 }
 
 // Footer summarizes degradation. It belongs on stderr: the table is the

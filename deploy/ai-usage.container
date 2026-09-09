@@ -1,0 +1,23 @@
+[Unit]
+Description=AI usage dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=localhost/ai-usage-web:local
+ContainerName=ai-usage-web
+EnvironmentFile=%h/.config/containers/systemd/ai-usage.env
+Environment=AI_USAGE_ADDR=:8080
+Environment=AI_USAGE_DATA_DIR=/data
+PublishPort=127.0.0.1:8080:8080
+Volume=ai-usage-data.volume:/data
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=90
+
+[Install]
+WantedBy=default.target

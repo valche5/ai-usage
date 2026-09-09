@@ -17,13 +17,22 @@ const openrouterCreditsURL = "https://openrouter.ai/api/v1/credits"
 
 // OpenRouter reports consumption of the prepaid credits pool, which is
 // account-wide: the numbers come back identical for every key of the account.
-type OpenRouter struct{}
+type OpenRouter struct {
+	Credentials func(time.Time) ([]credstore.Cred, error)
+}
 
 func (OpenRouter) ID() string   { return "openrouter" }
 func (OpenRouter) Name() string { return "OpenRouter" }
 
-func (OpenRouter) Fingerprint(now time.Time) string {
-	cands, err := credstore.OpenRouter()
+func (o OpenRouter) credentials(now time.Time) ([]credstore.Cred, error) {
+	if o.Credentials != nil {
+		return o.Credentials(now)
+	}
+	return credstore.OpenRouter()
+}
+
+func (o OpenRouter) Fingerprint(now time.Time) string {
+	cands, err := o.credentials(now)
 	if err != nil {
 		return ""
 	}
@@ -39,7 +48,7 @@ type openRouterCreditsResponse struct {
 }
 
 func (o OpenRouter) Collect(ctx context.Context, opts Options) Report {
-	cands, err := credstore.OpenRouter()
+	cands, err := o.credentials(opts.Now)
 	switch {
 	case errors.Is(err, credstore.ErrMissing):
 		return Unconfigured(o.ID(), o.Name(),
@@ -91,11 +100,15 @@ func (o OpenRouter) Collect(ctx context.Context, opts Options) Report {
 	base.Status = StatusOK
 	base.Source = SourceLive
 	base.FetchedAt = opts.Now
+	remaining := total - used
 	base.Windows = []Window{{
-		Key:         "solde",
-		Label:       "solde",
-		UsedPercent: used / total * 100,
+		Key:             "solde",
+		Label:           "crédit restant",
+		UsedPercent:     used / total * 100,
+		RemainingAmount: &remaining,
+		TotalAmount:     &total,
+		Currency:        "USD",
 	}}
-	base.Notes = []string{fmt.Sprintf("solde : $%.2f restants sur $%.2f", total-used, total)}
+	base.Notes = []string{fmt.Sprintf("$%.2f utilisés sur $%.2f achetés", used, total)}
 	return base
 }

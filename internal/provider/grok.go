@@ -16,14 +16,24 @@ import (
 // grokUsageURL is the JSON endpoint used by the Grok CLI's billing display.
 const grokUsageURL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
 
-// Grok reports SuperGrok subscription utilization.
-type Grok struct{}
+// Grok reports SuperGrok subscription utilization. Credentials is optional;
+// nil preserves local CLI credential discovery.
+type Grok struct {
+	Credentials func(time.Time) ([]credstore.Cred, error)
+}
 
 func (Grok) ID() string   { return "grok" }
 func (Grok) Name() string { return "Grok" }
 
-func (Grok) Fingerprint(now time.Time) string {
-	cands, err := credstore.Grok()
+func (g Grok) credentials(now time.Time) ([]credstore.Cred, error) {
+	if g.Credentials != nil {
+		return g.Credentials(now)
+	}
+	return credstore.Grok()
+}
+
+func (g Grok) Fingerprint(now time.Time) string {
+	cands, err := g.credentials(now)
 	if err != nil {
 		return ""
 	}
@@ -32,7 +42,7 @@ func (Grok) Fingerprint(now time.Time) string {
 }
 
 func (g Grok) Collect(ctx context.Context, o Options) Report {
-	cands, err := credstore.Grok()
+	cands, err := g.credentials(o.Now)
 	switch {
 	case errors.Is(err, credstore.ErrMissing):
 		return Unconfigured(g.ID(), g.Name(),

@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/valche5/ai-usage/internal/credstore"
@@ -12,14 +11,24 @@ import (
 
 const copilotUsageURL = "https://api.github.com/copilot_internal/user"
 
-// Copilot reports GitHub Copilot quota.
-type Copilot struct{}
+// Copilot reports GitHub Copilot quota. Credentials is optional; nil preserves
+// local credential discovery for the CLI.
+type Copilot struct {
+	Credentials func(time.Time) ([]credstore.Cred, error)
+}
 
 func (Copilot) ID() string   { return "copilot" }
 func (Copilot) Name() string { return "Copilot" }
 
-func (Copilot) Fingerprint(time.Time) string {
-	cands, err := credstore.Copilot()
+func (c Copilot) credentials(now time.Time) ([]credstore.Cred, error) {
+	if c.Credentials != nil {
+		return c.Credentials(now)
+	}
+	return credstore.Copilot()
+}
+
+func (c Copilot) Fingerprint(now time.Time) string {
+	cands, err := c.credentials(now)
 	if err != nil || len(cands) == 0 {
 		return ""
 	}
@@ -51,7 +60,7 @@ type copilotResponse struct {
 }
 
 func (c Copilot) Collect(ctx context.Context, o Options) Report {
-	cands, err := credstore.Copilot()
+	cands, err := c.credentials(o.Now)
 	switch {
 	case errors.Is(err, credstore.ErrMissing):
 		return Unconfigured(c.ID(), c.Name(), "aucun token GitHub trouvé pour Copilot")
@@ -121,64 +130,43 @@ func (c Copilot) Collect(ctx context.Context, o Options) Report {
 	return base
 }
 
-// copilotOrder keeps the most interesting quota first and gives each a short
-// label.
-var copilotOrder = []struct{ key, label string }{
-	{"premium_interactions", "premium"},
-	{"chat", "chat"},
-	{"completions", "complétions"},
-}
-
 func copilotWindows(r copilotResponse) ([]Window, []string) {
-	var out []Window
 	var notes []string
 	reset := copilotDate(r.QuotaResetDate)
-
-	seen := map[string]bool{}
-	for _, o := range copilotOrder {
-		q, ok := r.QuotaSnapshots[o.key]
-		if !ok {
-			continue
-		}
-		seen[o.key] = true
-		out = append(out, copilotWindow(o.key, o.label, q, reset))
+	if q, ok := r.QuotaSnapshots["premium_interactions"]; ok {
 		if q.OveragePermitted {
-			notes = append(notes, o.label+" : dépassement autorisé")
+			notes = append(notes, "premium : dépassement autorisé")
 		}
-	}
-	for key, q := range r.QuotaSnapshots {
-		if seen[key] {
-			continue
-		}
-		out = append(out, copilotWindow(key, key, q, reset))
-	}
-	if len(out) > 0 {
-		return out, notes
+		return []Window{copilotWindow("premium_interactions", "premium", q, reset)}, notes
 	}
 
 	// Free tier reports raw counts instead of percentages.
 	freeReset := copilotDate(r.LimitedUserResetDate)
-	for _, o := range copilotOrder {
-		limit, hasLimit := r.MonthlyQuotas[o.key]
-		remaining, hasRemaining := r.LimitedUserQuotas[o.key]
-		if !hasLimit || !hasRemaining || limit <= 0 {
-			continue
-		}
-		out = append(out, Window{
-			Key:         o.key,
-			Label:       o.label,
-			UsedPercent: (1 - remaining/limit) * 100,
-			ResetsAt:    freeReset,
-		})
-		notes = append(notes, fmt.Sprintf("%s : %.0f/%.0f restants", o.label, remaining, limit))
+	limit, hasLimit := r.MonthlyQuotas["premium_interactions"]
+	remaining, hasRemaining := r.LimitedUserQuotas["premium_interactions"]
+	if !hasLimit || !hasRemaining || limit <= 0 {
+		return nil, notes
 	}
-	return out, notes
+	used := limit - remaining
+	return []Window{{
+		Key:         "premium_interactions",
+		Label:       "premium",
+		UsedPercent: used / limit * 100,
+		UsedCount:   &used,
+		TotalCount:  &limit,
+		ResetsAt:    freeReset,
+	}}, notes
 }
 
 func copilotWindow(key, label string, q copilotQuota, reset *time.Time) Window {
 	w := Window{Key: key, Label: label, ResetsAt: reset, Unlimited: q.Unlimited}
 	if !q.Unlimited {
 		w.UsedPercent = 100 - q.PercentRemaining
+		if q.Entitlement > 0 {
+			used, total := q.Entitlement-q.Remaining, q.Entitlement
+			w.UsedCount = &used
+			w.TotalCount = &total
+		}
 	}
 	return w
 }

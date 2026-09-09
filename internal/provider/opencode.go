@@ -15,13 +15,22 @@ import (
 const opencodeUsageURL = "https://opencode.ai/zen/go/v1/usage"
 
 // OpenCode reports OpenCode Go subscription utilization.
-type OpenCode struct{}
+type OpenCode struct {
+	Credentials func(time.Time) ([]credstore.Cred, error)
+}
 
 func (OpenCode) ID() string   { return "opencode" }
 func (OpenCode) Name() string { return "OpenCode" }
 
-func (OpenCode) Fingerprint(now time.Time) string {
-	cands, err := credstore.OpenCode()
+func (o OpenCode) credentials(now time.Time) ([]credstore.Cred, error) {
+	if o.Credentials != nil {
+		return o.Credentials(now)
+	}
+	return credstore.OpenCode()
+}
+
+func (o OpenCode) Fingerprint(now time.Time) string {
+	cands, err := o.credentials(now)
 	if err != nil {
 		return ""
 	}
@@ -45,7 +54,7 @@ type opencodeUsageResponse struct {
 }
 
 func (o OpenCode) Collect(ctx context.Context, opts Options) Report {
-	cands, err := credstore.OpenCode()
+	cands, err := o.credentials(opts.Now)
 	switch {
 	case errors.Is(err, credstore.ErrMissing):
 		return Unconfigured(o.ID(), o.Name(),

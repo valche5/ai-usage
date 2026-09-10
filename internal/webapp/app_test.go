@@ -363,3 +363,81 @@ func TestWebSocketDrivesCollectionAndManualRefresh(t *testing.T) {
 		t.Fatalf("client count after close = %d", count)
 	}
 }
+
+func TestBearerReadsReportsWithoutCookie(t *testing.T) {
+	app, _ := testApp(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/reports", nil)
+	req.Header.Set("Authorization", "Bearer correct horse")
+	res := httptest.NewRecorder()
+	app.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("bearer reports status = %d body=%q", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"schema_version"`) {
+		t.Fatalf("bearer reports body = %q", res.Body.String())
+	}
+}
+
+func TestBearerRejectsWrongToken(t *testing.T) {
+	app, _ := testApp(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/reports", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	res := httptest.NewRecorder()
+	app.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong bearer status = %d", res.Code)
+	}
+	if got := res.Header().Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
+		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+}
+
+func TestDedicatedAPITokenIsAccepted(t *testing.T) {
+	app, _ := testApp(t)
+	app.config.APIToken = "dedicated-token"
+	req := httptest.NewRequest(http.MethodGet, "/api/reports", nil)
+	req.Header.Set("Authorization", "Bearer dedicated-token")
+	res := httptest.NewRecorder()
+	app.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("api token status = %d", res.Code)
+	}
+}
+
+func TestBearerRefreshSkipsCSRF(t *testing.T) {
+	app, _ := testApp(t)
+	req := httptest.NewRequest(http.MethodPost, "/refresh", nil)
+	req.Header.Set("Authorization", "Bearer correct horse")
+	res := httptest.NewRecorder()
+	app.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusSeeOther {
+		t.Fatalf("bearer refresh status = %d, want 303", res.Code)
+	}
+}
+
+func TestBearerWebSocketWithoutCSRF(t *testing.T) {
+	app, _ := testApp(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	app.Run(ctx)
+	server := httptest.NewServer(app.Handler())
+	defer server.Close()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer correct horse")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	var snapshot reportsPayload
+	if err := conn.ReadJSON(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Type != "reports" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}

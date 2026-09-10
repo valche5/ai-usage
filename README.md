@@ -36,6 +36,22 @@ make install     # go build + symlink dans ~/.local/bin/ai-usage
 
 Go 1.26+, zéro dépendance, binaire statique.
 
+## Application Android
+
+Client Kotlin / Jetpack Compose du dashboard homelab. Pas de WebView, pas de logique OAuth
+dans l'app : elle envoie `Authorization: Bearer …` à `GET /api/reports` (URL Tailscale
+par défaut `https://aiusage.tail262be8.ts.net`). Le jeton est `AI_USAGE_API_TOKEN` s'il
+est défini, sinon le mot de passe web. Le téléphone doit voir le serveur (Tailscale).
+Les connexions ChatGPT / Grok / Copilot se font toujours depuis le dashboard web.
+
+```sh
+make android     # APK dans dist/ai-usage.apk
+```
+
+JDK 17 et un Android SDK (API 35) sont requis. `scripts/build-android.sh` cherche
+`$HOME/.local/jdk-17` et `$HOME/.local/android-sdk`. `Containerfile.android` sert
+d'image de build reproductible.
+
 ## Usage
 
 ```
@@ -193,12 +209,15 @@ répertoire. Le serveur accepte aussi `AI_USAGE_PASSWORD_FILE` et
 comme variables d'environnement. Une perte de la clé rend volontairement le fichier
 irrécupérable.
 
-L'API normalisée est disponible sur `GET /api/reports` avec le même cookie de session. Elle n'expose
-ni tokens, ni refresh tokens, ni empreintes de credentials. Le dashboard ouvre une connexion
-WebSocket authentifiée : tant qu'au moins un client est présent, le serveur actualise les
-données selon les TTL des providers et pousse chaque nouvel état à tous les clients. Sans
-client, les appels sortants sont suspendus. Le bouton **Actualiser** demande une collecte
-forcée sur cette même connexion et `last_refresh` indique la fin du dernier cycle.
+L'API normalisée est disponible sur `GET /api/reports`. Le navigateur s'authentifie avec le
+cookie de session ; un client natif (l'app Android) envoie `Authorization: Bearer <jeton>` —
+le mot de passe web, ou `AI_USAGE_API_TOKEN` s'il est défini. L'API n'expose ni tokens OAuth,
+ni refresh tokens, ni empreintes de credentials. Le dashboard ouvre une connexion
+WebSocket authentifiée (cookie+CSRF, ou le même Bearer) : tant qu'au moins un client est
+présent, le serveur actualise les données selon les TTL des providers et pousse chaque
+nouvel état à tous les clients. Sans client, les appels sortants sont suspendus. Le bouton
+**Actualiser** demande une collecte forcée sur cette même connexion et `last_refresh`
+indique la fin du dernier cycle.
 
 Variables principales :
 
@@ -206,7 +225,8 @@ Variables principales :
 |---|---:|---|
 | `AI_USAGE_ADDR` | `:8080` | adresse d'écoute dans le container |
 | `AI_USAGE_DATA_DIR` | `.ai-usage-web` | répertoire du fichier chiffré (`/data` dans le conteneur) |
-| `AI_USAGE_PASSWORD` | — | mot de passe obligatoire |
+| `AI_USAGE_PASSWORD` | — | mot de passe web obligatoire ; accepté aussi comme Bearer |
+| `AI_USAGE_API_TOKEN` | — | jeton Bearer optionnel dédié à l'API / l'app Android |
 | `AI_USAGE_SESSION_TTL` | `168h` | durée d'une session web conservée en mémoire (7 jours) |
 | `AI_USAGE_ENCRYPTION_KEY` | — | clé obligatoire, 32 octets en base64 |
 | `AI_USAGE_REFRESH_INTERVAL` | `1m` | fréquence d'actualisation tant qu'un client WebSocket est connecté ; les TTL provider restent appliqués |

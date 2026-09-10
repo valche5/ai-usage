@@ -73,8 +73,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	apiToken, err := secretEnv("AI_USAGE_API_TOKEN")
+	if err != nil {
+		return err
+	}
 	app, err := webapp.New(webapp.Config{
 		Password:        password,
+		APIToken:        apiToken,
 		SessionTTL:      sessionTTL,
 		RefreshInterval: refreshEvery,
 		HTTPTimeout:     timeout,

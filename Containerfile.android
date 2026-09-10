@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Image de build de l'APK Kotlin (JDK 17 + Android SDK).
+FROM eclipse-temurin:17-jdk-jammy
+ARG ANDROID_SDK_PACKAGES="platform-tools platforms;android-35 build-tools;35.0.0"
+ENV ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk \
+    DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && wget -q https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -O /tmp/cmdtools.zip \
+    && mkdir -p $ANDROID_HOME/cmdline-tools \
+    && unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools \
+    && mv /tmp/cmdtools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest \
+    && rm -rf /tmp/cmdtools /tmp/cmdtools.zip \
+    && yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses >/dev/null \
+    && $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME $ANDROID_SDK_PACKAGES
+WORKDIR /src/android
+CMD ["./gradlew", "--no-daemon", "assembleRelease"]

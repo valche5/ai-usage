@@ -28,10 +28,21 @@ import (
 
 type Config struct {
 	Password        string
+	APIToken        string // optional dedicated Bearer; the password is always accepted
 	SessionTTL      time.Duration
 	RefreshInterval time.Duration
 	HTTPTimeout     time.Duration
 }
+
+type authKind int
+
+const (
+	authNone authKind = iota
+	authSession
+	authBearer
+)
+
+type authKindKey struct{}
 
 type App struct {
 	config  Config
@@ -516,9 +527,11 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 func (a *App) webSocket(w http.ResponseWriter, r *http.Request) {
-	if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("csrf")), []byte(a.csrf)) != 1 {
-		http.Error(w, "jeton WebSocket refusé", http.StatusForbidden)
-		return
+	if requestAuth(r) != authBearer {
+		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("csrf")), []byte(a.csrf)) != 1 {
+			http.Error(w, "jeton WebSocket refusé", http.StatusForbidden)
+			return
+		}
 	}
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -734,15 +747,47 @@ func (a *App) validSession(r *http.Request) bool {
 	return ok
 }
 
+func (a *App) validBearer(r *http.Request) bool {
+	header := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return false
+	}
+	token := strings.TrimSpace(header[len(prefix):])
+	if token == "" {
+		return false
+	}
+	okPassword := subtle.ConstantTimeCompare([]byte(token), []byte(a.config.Password)) == 1
+	okAPI := false
+	if a.config.APIToken != "" {
+		okAPI = subtle.ConstantTimeCompare([]byte(token), []byte(a.config.APIToken)) == 1
+	}
+	return okPassword || okAPI
+}
+
+func withAuth(r *http.Request, kind authKind) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), authKindKey{}, kind))
+}
+
+func requestAuth(r *http.Request) authKind {
+	kind, _ := r.Context().Value(authKindKey{}).(authKind)
+	return kind
+}
+
 func (a *App) sessionAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/login" {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if a.validBearer(r) {
+			next.ServeHTTP(w, withAuth(r, authBearer))
+			return
+		}
 		if !a.validSession(r) {
 			if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" {
-				http.Error(w, "session requise", http.StatusUnauthorized)
+				w.Header().Set("WWW-Authenticate", `Bearer realm="ai-usage"`)
+				http.Error(w, "authentification requise", http.StatusUnauthorized)
 				return
 			}
 			http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
@@ -753,7 +798,7 @@ func (a *App) sessionAuth(next http.Handler) http.Handler {
 			http.Error(w, "jeton CSRF refusé — recharge la page", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, withAuth(r, authSession))
 	})
 }
 

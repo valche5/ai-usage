@@ -2,7 +2,7 @@ BIN     := ai-usage
 PREFIX  ?= $(HOME)/.local
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: all build build-web android install uninstall test vet fmt check clean release snapshot
+.PHONY: all build build-web install uninstall test vet fmt check clean release snapshot
 
 all: build
 
@@ -38,9 +38,6 @@ snapshot:
 release:
 	goreleaser release --clean
 
-android:
-	./scripts/build-android.sh
-
 clean:
 	rm -f $(BIN) ai-usage-web
-	rm -rf dist android/build android/app/build android/.gradle
+	rm -rf dist
